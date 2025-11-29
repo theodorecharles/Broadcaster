@@ -42,14 +42,11 @@ class TelevisionUI {
         }
 
         channelPool.queue.forEach(channel => {
-          if (channel.timeline.started) {
+          if (channel.started) {
             manifest.channels.push({
               name: channel.name,
               slug: channel.slug
             })
-            if (manifest.upcoming.length <= MANIFEST_UPCOMING_COUNT) {
-
-            }
           }
         })
         res.send(JSON.stringify(manifest))
@@ -60,24 +57,25 @@ class TelevisionUI {
 
       this.app.get(`/${channel.slug}.m3u8`, function(req,res){
 
-          if (channel.timeline.started) {
-
-              const offset = Date.now() - channel.timeline.startTime
+          if (channel.started) {
 
               try {
-                  
-                  var stream = channel.m3u8
-                  stream = stream.toString().replace(/\#EXT\-X\-PLAYLIST\-TYPE\:EVENT\n/,`#EXT-X-PLAYLIST-TYPE:EVENT\n#EXT-X-START:TIME-OFFSET=${offset/1000}\n`)
-                  stream = stream.toString().replace(/\#EXT\-X\-ENDLIST\n/g, '')
-                  stream = stream.toString().replace(/\#EXT\-X\-DISCONTINUITY\n/g, '')
-                  stream = stream.replace(/\n_/g,`\nchannels/${channel.slug}/_`)
+
+                  const playlist = channel.getPlaylist()
+
+                  if (!playlist) {
+                      res.statusCode = 500
+                      res.send('Playlist not available')
+                      return
+                  }
+
                   res.set({
                       'Content-Type': 'application/x-mpegURL',
                       'Cache-Control': `max-age=${M3U8_MAX_AGE}`,
                       'Cache-Control': `min-fresh=${M3U8_MAX_AGE}`,
                       'Strict-Transport-Security': `max-age=${Date.now() + M3U8_MAX_AGE*1000}; includeSubDomains;  preload`
                   })
-                  res.send(stream)
+                  res.send(playlist)
 
               } catch(e) {
                   Log(tag, `Couldn't return m3u8:\n` + e, channel)

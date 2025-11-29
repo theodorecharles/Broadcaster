@@ -19,7 +19,7 @@ class ChannelPool {
 
   startBroadcast() {
     this.queue.forEach((channel) => {
-      channel.timeline.start()
+      channel.start()
     })
   }
 

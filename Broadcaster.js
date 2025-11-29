@@ -1,6 +1,7 @@
 require('dotenv').config({ path: `./config.txt` })
 const ChannelPool = require('./Utilities/ChannelPool.js')
 const { Channel } = require('./Classes/Channel.js')
+const PreGenerator = require('./Utilities/PreGenerator.js')
 const Bash = require('child_process').execSync
 const Log = require('./Utilities/Log.js')
 const tag = "Main"
@@ -12,7 +13,6 @@ const cleanup = () => {
   Log(tag, 'Cleaning up ...')
   try {
     Bash('rm -r ./Webapp/channels/* 2> /dev/null &')
-    Bash(`rm -r ${CACHE_DIR}/broadcaster* 2> /dev/null &`)
   } catch (e) {
     Log(tag, 'Bash emitted an error: ' + e)
   }
@@ -43,18 +43,40 @@ try {
     const channel = new Channel(definition)
     ChannelPool().addChannel(channel)
   })
-} catch (e) { 
-  Log(tag, 'Unable to start the segmenters: ' + e) 
+} catch (e) {
+  Log(tag, 'Unable to create channels: ' + e)
 }
 
-try { 
-  const ui = TelevisionUI().start(ChannelPool())
-} catch (e) { 
-  Log(tag, 'Unable to start the TV UI: ' + e) 
+// Pre-generate HLS streams
+async function startup() {
+  try {
+    Log(tag, 'Checking for pre-generated HLS streams...')
+
+    // Queue all channels for generation
+    ChannelPool().queue.forEach(channel => {
+      PreGenerator.queueChannel(channel)
+    })
+
+    // Generate any missing streams
+    await PreGenerator.startGeneration()
+
+    Log(tag, 'All HLS streams ready!')
+
+  } catch (e) {
+    Log(tag, 'Error during pre-generation: ' + e)
+  }
+
+  try {
+    const ui = TelevisionUI().start(ChannelPool())
+  } catch (e) {
+    Log(tag, 'Unable to start the TV UI: ' + e)
+  }
+
+  try {
+    ChannelPool().startBroadcast()
+  } catch (e) {
+    Log(tag, 'Unable to start the broadcast: ' + e)
+  }
 }
 
-try { 
-  ChannelPool().startBroadcast() 
-} catch (e) { 
-  Log(tag, 'Unable to start the broadcast: ' + e) 
-}
+startup()

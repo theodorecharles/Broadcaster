@@ -24,18 +24,7 @@
   "name": "Star Trek TV",
   "slug": "startrektv",
   "paths": [
-    "/mnt/user/TV Shows/Star Trek Continues",
-    "/mnt/user/TV Shows/Star Trek - Deep Space 9",
-    "/mnt/user/TV Shows/Star Trek Discovery",
-    "/mnt/user/TV Shows/Star Trek - Enterprise",
-    "/mnt/user/TV Shows/Star Trek - Lower Decks",
-    "/mnt/user/TV Shows/Star Trek- Picard",
-    "/mnt/user/TV Shows/Star Trek- Short Treks",
-    "/mnt/user/TV Shows/Star Trek - Strange New Worlds",
-    "/mnt/user/TV Shows/Star Trek - The Animated Series",
     "/mnt/user/TV Shows/Star Trek - The Next Generation",
-    "/mnt/user/TV Shows/Star Trek The Next Generation",
-    "/mnt/user/TV Shows/Star Trek - The Original Series",
-    "/mnt/user/TV Shows/Star Trek - Voyager"
+    "/mnt/user/TV Shows/Star Trek - The Original Series"
   ]
 }]
