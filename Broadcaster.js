@@ -24,7 +24,8 @@ try {
   require('dotenv').config({ path: `./config.txt` })
 
   // Check if channels.json exists, create default if it doesn't
-  const channelsPath = `.${CHANNEL_LIST}`
+  // Support both absolute paths (/data/channels.json) and relative paths (./channels.json)
+  const channelsPath = CHANNEL_LIST.startsWith('/') ? CHANNEL_LIST : `.${CHANNEL_LIST}`
   if (!fs.existsSync(channelsPath)) {
     Log(tag, `No channels.json found at ${channelsPath}, creating default...`)
     const defaultChannels = [
