@@ -105,20 +105,35 @@ class PreGenerator {
      */
     getVideoInfo(filePath) {
         try {
-            const result = execSync(
+            // Get video stream info
+            const videoResult = execSync(
                 `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,pix_fmt,width,height,bit_depth -of csv=p=0 "${filePath}"`,
                 { encoding: 'utf8', timeout: 10000 }
             )
-            const parts = result.trim().split(',')
+            const videoParts = videoResult.trim().split(',')
+
+            // Get audio stream info
+            let audioCodec = 'unknown'
+            try {
+                const audioResult = execSync(
+                    `ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "${filePath}"`,
+                    { encoding: 'utf8', timeout: 10000 }
+                )
+                audioCodec = audioResult.trim() || 'unknown'
+            } catch (e) {
+                audioCodec = 'none'
+            }
+
             return {
-                codec: parts[0] || 'unknown',
-                width: parts[1] || 'unknown',
-                height: parts[2] || 'unknown',
-                pixFmt: parts[3] || 'unknown',
-                bitDepth: parts[4] || '8'
+                codec: videoParts[0] || 'unknown',
+                width: videoParts[1] || 'unknown',
+                height: videoParts[2] || 'unknown',
+                pixFmt: videoParts[3] || 'unknown',
+                bitDepth: videoParts[4] || '8',
+                audioCodec: audioCodec
             }
         } catch (e) {
-            return { codec: 'error', width: '?', height: '?', pixFmt: '?', bitDepth: '?' }
+            return { codec: 'error', width: '?', height: '?', pixFmt: '?', bitDepth: '?', audioCodec: '?' }
         }
     }
 
@@ -136,7 +151,7 @@ class PreGenerator {
 
             // Log video info before transcoding
             const videoInfo = this.getVideoInfo(filePath)
-            Log(tag, `Processing ${path.basename(filePath)} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit]`, channel)
+            Log(tag, `Processing ${path.basename(filePath)} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit | audio: ${videoInfo.audioCodec}]`, channel)
 
             const useGPU = checkNvidiaGPU()
             const [width, height] = DIMENSIONS.split('x')
@@ -171,6 +186,12 @@ class PreGenerator {
                 fullVideoFilter = `${videoFilter},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
             }
 
+            // Determine audio handling - copy if already AAC, otherwise re-encode
+            const canCopyAudio = videoInfo.audioCodec === 'aac'
+            const audioArgs = canCopyAudio
+                ? ['-c:a', 'copy']
+                : ['-c:a', AUDIO_CODEC, '-b:a', AUDIO_BITRATE, '-ac', '2']
+
             const args = [
                 ...inputArgs,
                 '-vf', fullVideoFilter,
@@ -180,9 +201,7 @@ class PreGenerator {
                 '-profile:v', 'main',
                 '-level', '3.1',
                 '-pix_fmt', 'yuv420p',
-                '-c:a', AUDIO_CODEC,
-                '-b:a', AUDIO_BITRATE,
-                '-ac', '2',
+                ...audioArgs,
                 '-hls_time', HLS_SEGMENT_LENGTH_SECONDS,
                 '-hls_list_size', '0',
                 '-hls_segment_filename', path.join(outputDir, 'segment_%05d.ts'),
