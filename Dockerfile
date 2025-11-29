@@ -1,81 +1,18 @@
-# Build stage for FFmpeg with NVIDIA support
-FROM nvidia/cuda:12.6.3-devel-ubuntu24.04 AS ffmpeg-builder
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    pkg-config \
-    yasm \
-    nasm \
-    git \
-    wget \
-    ca-certificates \
-    libass-dev \
-    libfreetype6-dev \
-    libgnutls28-dev \
-    libmp3lame-dev \
-    libopus-dev \
-    libvorbis-dev \
-    libvpx-dev \
-    libx264-dev \
-    libx265-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install nv-codec-headers (required for NVIDIA encoding/decoding)
-WORKDIR /tmp
-RUN git clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git && \
-    cd nv-codec-headers && \
-    make install && \
-    cd .. && \
-    rm -rf nv-codec-headers
-
-# Build FFmpeg with NVIDIA support
-RUN git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg && \
-    cd ffmpeg && \
-    ./configure \
-    --enable-nonfree \
-    --enable-cuda-nvcc \
-    --enable-libnpp \
-    --extra-cflags=-I/usr/local/cuda/include \
-    --extra-ldflags=-L/usr/local/cuda/lib64 \
-    --enable-gpl \
-    --enable-gnutls \
-    --enable-libass \
-    --enable-libfreetype \
-    --enable-libmp3lame \
-    --enable-libopus \
-    --enable-libvorbis \
-    --enable-libvpx \
-    --enable-libx264 \
-    --enable-libx265 \
-    --enable-nvenc \
-    --enable-nvdec \
-    --enable-cuvid \
-    && make -j$(nproc) && \
-    make install && \
-    ldconfig
-
-# Runtime stage
+# Use NVIDIA CUDA runtime base image
 FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
 
-# Install runtime dependencies
+# Install system dependencies and ffmpeg with NVIDIA support
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && ffmpeg -version
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
-
-# Copy FFmpeg from builder
-COPY --from=ffmpeg-builder /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
-COPY --from=ffmpeg-builder /usr/local/bin/ffprobe /usr/local/bin/ffprobe
-COPY --from=ffmpeg-builder /usr/local/lib/lib*.so* /usr/local/lib/
-
-# Update library cache
-RUN ldconfig
 
 # Create app directory
 WORKDIR /app
