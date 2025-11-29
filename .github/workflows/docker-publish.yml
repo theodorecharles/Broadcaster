@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - master
-      - main
     tags:
       - 'v*.*.*'
   pull_request:
@@ -14,7 +13,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_IMAGE: theodoreroddy/broadcaster
+  DOCKER_IMAGE: tedcharles/broadcaster
 
 jobs:
   build-and-push:
