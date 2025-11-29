@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node Broadcaster.js",
     "test": "node Broadcaster.js",
+    "build:frontend": "cd Webapp && npm run build",
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:stop": "pm2 stop broadcaster",
     "pm2:restart": "pm2 restart broadcaster",

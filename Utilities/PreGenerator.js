@@ -32,14 +32,33 @@ class PreGenerator {
     }
 
     /**
-     * Check if HLS files already exist for this video
+     * Check if HLS files already exist for this video and are complete
      */
     isAlreadyGenerated(filePath, channelSlug) {
         const videoHash = this.getVideoHash(filePath)
-        const outputDir = path.join(CACHE_DIR, 'channels', channelSlug, 'videos', videoHash)
+        const outputDir = path.join(CACHE_DIR, 'broadcaster', 'channels', channelSlug, 'videos', videoHash)
         const playlistPath = path.join(outputDir, 'index.m3u8')
 
-        return fs.existsSync(playlistPath)
+        // Check if playlist exists
+        if (!fs.existsSync(playlistPath)) {
+            return false
+        }
+
+        // Check if there are actual segment files
+        try {
+            const files = fs.readdirSync(outputDir)
+            const segmentFiles = files.filter(f => f.endsWith('.ts'))
+
+            // If we have a playlist but no segments, it's incomplete
+            if (segmentFiles.length === 0) {
+                Log(tag, `Incomplete generation detected for ${path.basename(filePath)} - no segments found`)
+                return false
+            }
+
+            return true
+        } catch (e) {
+            return false
+        }
     }
 
     /**
@@ -67,16 +86,19 @@ class PreGenerator {
     generateVideo(filePath, channel) {
         return new Promise((resolve, reject) => {
             const videoHash = this.getVideoHash(filePath)
-            const outputDir = path.join(CACHE_DIR, 'channels', channel.slug, 'videos', videoHash)
+            const outputDir = path.join(CACHE_DIR, 'broadcaster', 'channels', channel.slug, 'videos', videoHash)
             const outputPath = path.join(outputDir, 'index.m3u8')
 
             // Create output directory
             fs.mkdirSync(outputDir, { recursive: true })
 
+            // Build video filter with scale that maintains aspect ratio
+            const [width, height] = DIMENSIONS.split('x')
+            const videoFilter = `${VIDEO_FILTER},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
+
             const args = [
                 '-i', filePath,
-                '-vf', VIDEO_FILTER,
-                '-s', DIMENSIONS,
+                '-vf', videoFilter,
                 '-c:v', VIDEO_CODEC,
                 '-preset', VIDEO_PRESET,
                 '-crf', VIDEO_CRF,

@@ -1,30 +1,16 @@
 [{
   "type": "shuffle",
-  "name": "Star Trek Movies",
-  "slug": "startrek",
+  "name": "Star Trek TV",
+  "slug": "startrektv",
   "paths": [
-    "/mnt/user/Movies/Star Trek (2009)",
-    "/mnt/user/Movies/Star Trek Beyond (2016)",
-    "/mnt/user/Movies/Star Trek - First Contact (1996)",
-    "/mnt/user/Movies/Star Trek - Generations (1994)",
-    "/mnt/user/Movies/Star Trek III - The Search For Spock (1984)",
-    "/mnt/user/Movies/Star Trek II - The Wrath of Khan (1982)",
-    "/mnt/user/Movies/Star Trek - Insurrection (1998)",
-    "/mnt/user/Movies/Star Trek Into Darkness (2013)",
-    "/mnt/user/Movies/Star Trek IV - The Voyage Home (1986)",
-    "/mnt/user/Movies/Star Trek - Nemesis (2002)",
-    "/mnt/user/Movies/Star Trek - Renegades (2015)",
-    "/mnt/user/Movies/Star Trek - The Motion Picture (1979)",
-    "/mnt/user/Movies/Star Trek VI - The Undiscovered Country (1991)",
-    "/mnt/user/Movies/Star Trek V - The Final Frontier (1989)"
+    "/Users/Ted/Desktop/content/tv"
   ]
 },
 {
   "type": "shuffle",
-  "name": "Star Trek TV",
-  "slug": "startrektv",
+  "name": "Star Trek Movies",
+  "slug": "startrekmovies",
   "paths": [
-    "/mnt/user/TV Shows/Star Trek - The Next Generation",
-    "/mnt/user/TV Shows/Star Trek - The Original Series"
+    "/Users/Ted/Desktop/content/movies"
   ]
 }]

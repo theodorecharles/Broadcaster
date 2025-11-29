@@ -1,10 +1,26 @@
 const Format = require('../Utilities/FormatValidator.js')
-const Bash = require('child_process').execSync
 const { PlaylistManager } = require('./PlaylistManager.js')
 const Log = require('../Utilities/Log.js')
 const fs = require('fs')
+const path = require('path')
 const { CACHE_DIR } = process.env
 const tag = 'Channel'
+
+// Recursively find all files in a directory
+function findFiles(dir, fileList = []) {
+  const files = fs.readdirSync(dir)
+
+  files.forEach(file => {
+    const filePath = path.join(dir, file)
+    if (fs.statSync(filePath).isDirectory()) {
+      findFiles(filePath, fileList)
+    } else {
+      fileList.push(filePath)
+    }
+  })
+
+  return fileList
+}
 
 function Channel(definition) {
 
@@ -18,18 +34,18 @@ function Channel(definition) {
   this.startTime = null
   this.started = false
 
-  definition.paths.forEach(path => {
-    
+  definition.paths.forEach(dirPath => {
+
     var x = 0
-    Bash(`find "${path}" -type f`).toString().split('\n').forEach(file => {
-      const array = file.split('.')
-      const last = array.pop()
+    const files = findFiles(dirPath)
+
+    files.forEach(file => {
       if (Format.isSupported(file)) {
         this.queue.push(file)
         x++
       }
     })
-    Log(tag, `Found ${x} supported files in ${path}`, this)
+    Log(tag, `Found ${x} supported files in ${dirPath}`, this)
 
     if (definition.type == 'shuffle') this.queue.sort(() => Math.random() - 0.5)
 

@@ -25,7 +25,7 @@ class PlaylistManager {
      */
     getVideoPlaylistPath(filePath) {
         const videoHash = this.getVideoHash(filePath)
-        return path.join(CACHE_DIR, 'channels', this.channel.slug, 'videos', videoHash, 'index.m3u8')
+        return path.join(CACHE_DIR, 'broadcaster', 'channels', this.channel.slug, 'videos', videoHash, 'index.m3u8')
     }
 
     /**
@@ -120,26 +120,36 @@ class PlaylistManager {
         // Normalize offset to loop within total duration
         const normalizedOffset = offsetSeconds % totalDuration
 
-        // Build playlist
+        // Find current position in the stream
+        let currentIndex = 0
+        for (let i = 0; i < allSegments.length; i++) {
+            if (allSegments[i].timestamp > normalizedOffset) {
+                currentIndex = i
+                break
+            }
+        }
+
+        // Include 30 seconds behind and 60 seconds ahead
+        const windowStart = Math.max(0, currentIndex - 30)
+        const windowEnd = Math.min(allSegments.length, currentIndex + 60)
+        const segmentsInWindow = allSegments.slice(windowStart, windowEnd)
+
+        // Calculate sequence number based on window start
+        const mediaSequence = windowStart
+
+        // Build playlist for live streaming (no ENDLIST tag)
         let playlist = '#EXTM3U\n'
         playlist += '#EXT-X-VERSION:3\n'
-        playlist += '#EXT-X-TARGETDURATION:' + Math.ceil(Math.max(...allSegments.map(s => s.duration))) + '\n'
-        playlist += '#EXT-X-MEDIA-SEQUENCE:0\n'
-        playlist += `#EXT-X-START:TIME-OFFSET=${normalizedOffset}\n`
+        playlist += '#EXT-X-TARGETDURATION:2\n'
+        playlist += `#EXT-X-MEDIA-SEQUENCE:${mediaSequence}\n`
 
-        // Add all segments (client will seek to TIME-OFFSET)
-        allSegments.forEach(segment => {
+        // Add segments in window
+        segmentsInWindow.forEach(segment => {
             playlist += `#EXTINF:${segment.duration.toFixed(6)},\n`
             playlist += `${segment.path}\n`
         })
 
-        // Loop back to beginning
-        playlist += '#EXT-X-DISCONTINUITY\n'
-        allSegments.forEach(segment => {
-            playlist += `#EXTINF:${segment.duration.toFixed(6)},\n`
-            playlist += `${segment.path}\n`
-        })
-
+        // Don't add EXT-X-ENDLIST or PLAYLIST-TYPE - this tells the player it's a live stream
         return playlist
     }
 

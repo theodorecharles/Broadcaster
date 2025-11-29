@@ -4,13 +4,13 @@ const Log = require('../Utilities/Log.js')
 const tag = 'TelevisionUI'
 const compression = require('compression')
 
-const { WEB_UI_PORT, 
-        MANIFEST_UPCOMING_COUNT, 
+const { WEB_UI_PORT,
+        MANIFEST_UPCOMING_COUNT,
         M3U8_MAX_AGE,
         CACHE_DIR } = process.env
-        
-const Bash = require('child_process').execSync
+
 const fs = require('fs')
+const path = require('path')
 const ChannelPool = require('../Utilities/ChannelPool.js')
 
 // express app that listens on specified port and handles GET requests for .m3u8 files
@@ -26,11 +26,21 @@ class TelevisionUI {
   }
 
   start(channelPool) {
-    
-    Bash(`cp -r ${__dirname}/static ${CACHE_DIR}/broadcaster/channels/\n` +
-         `cp ${__dirname}/index.html ${CACHE_DIR}/broadcaster/\n` +
-         `cp ${__dirname}/favicon.ico ${CACHE_DIR}/broadcaster/\n` +
-         `cp ${__dirname}/static.gif ${CACHE_DIR}/broadcaster/ &`)
+
+    // Create directories and copy static files
+    const broadcasterDir = path.join(CACHE_DIR, 'broadcaster')
+    const channelsDir = path.join(broadcasterDir, 'channels')
+
+    fs.mkdirSync(channelsDir, { recursive: true })
+
+    // Copy static directory
+    fs.cpSync(path.join(__dirname, 'static'), path.join(channelsDir, 'static'), { recursive: true })
+
+    // Copy built React app (dist folder)
+    fs.cpSync(path.join(__dirname, 'dist'), broadcasterDir, { recursive: true, force: true })
+
+    // Copy static.gif
+    fs.copyFileSync(path.join(__dirname, 'static.gif'), path.join(broadcasterDir, 'static.gif'))
 
     this.app.use(express.static(`${CACHE_DIR}/broadcaster`))
     this.app.use(compression())
