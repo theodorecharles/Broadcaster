@@ -62,14 +62,14 @@ FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
 RUN apt-get update && apt-get install -y \
     libass9 \
     libfreetype6 \
-    libgnutls30t64 \
+    libgnutls30 \
     libmp3lame0 \
     libopus0 \
     libvorbis0a \
     libvorbisenc2 \
-    libvpx9 \
-    libx264-164 \
-    libx265-209 \
+    libvpx7 \
+    libx264-dev \
+    libx265-dev \
     ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
