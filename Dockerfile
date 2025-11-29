@@ -60,16 +60,6 @@ FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
-    libass9 \
-    libfreetype6 \
-    libgnutls30 \
-    libmp3lame0 \
-    libopus0 \
-    libvorbis0a \
-    libvorbisenc2 \
-    libvpx7 \
-    libx264-dev \
-    libx265-dev \
     ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
