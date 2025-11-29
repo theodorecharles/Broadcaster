@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Broadcaster</Name>
-  <Repository>theodoreroddy/broadcaster:latest</Repository>
+  <Repository>tedcharles/broadcaster:latest</Repository>
   <Registry>https://hub.docker.com/</Registry>
   <Network>bridge</Network>
   <MyIP/>

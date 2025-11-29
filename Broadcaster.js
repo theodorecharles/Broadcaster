@@ -9,9 +9,13 @@ const path = require('path')
 const TelevisionUI = require('./Webapp/TelevisionUI.js')
 const { CACHE_DIR, CHANNEL_LIST } = process.env
 
+// Support both absolute paths (/data/channels.json) and relative paths (./channels.json)
+const channelsPath = CHANNEL_LIST.startsWith('/') ? CHANNEL_LIST : `.${CHANNEL_LIST}`
+
+let uiStarted = false
+
 const cleanup = () => {
   Log(tag, 'Cleaning up ...')
-  // Cleanup handled by process exit
   Log(tag, 'Bye now.')
 }
 
@@ -20,79 +24,139 @@ process.on('SIGINT', _ => {
   process.exit(0)
 })
 
-try {
-  require('dotenv').config({ path: `./config.txt` })
+// Load and parse channels.json
+function loadChannels() {
+  try {
+    if (!fs.existsSync(channelsPath)) {
+      Log(tag, `No channels.json found at ${channelsPath}, creating default...`)
+      const defaultChannels = [
+        {
+          "type": "shuffle",
+          "name": "Example Channel",
+          "slug": "example",
+          "paths": [
+            "/media"
+          ]
+        }
+      ]
+      fs.mkdirSync(path.dirname(channelsPath), { recursive: true })
+      fs.writeFileSync(channelsPath, JSON.stringify(defaultChannels, null, 2))
+      Log(tag, `Created default channels.json. Edit ${CHANNEL_LIST} to configure your channels.`)
+    }
 
-  // Check if channels.json exists, create default if it doesn't
-  // Support both absolute paths (/data/channels.json) and relative paths (./channels.json)
-  const channelsPath = CHANNEL_LIST.startsWith('/') ? CHANNEL_LIST : `.${CHANNEL_LIST}`
-  if (!fs.existsSync(channelsPath)) {
-    Log(tag, `No channels.json found at ${channelsPath}, creating default...`)
-    const defaultChannels = [
-      {
-        "type": "shuffle",
-        "name": "Example Channel",
-        "slug": "example",
-        "paths": [
-          "/media"
-        ]
+    const data = fs.readFileSync(channelsPath)
+    const channels = JSON.parse(data)
+    Log(tag, `Found ${channels.length} channel definition${channels.length > 1 ? 's' : ''}:`)
+    return channels
+  } catch (e) {
+    Log(tag, `Error loading channels.json: ${e}`)
+    return []
+  }
+}
+
+// Initialize channels from config
+function initializeChannels(channelDefinitions) {
+  try {
+    channelDefinitions.forEach(definition => {
+      const channel = new Channel(definition)
+      ChannelPool().addChannel(channel)
+    })
+  } catch (e) {
+    Log(tag, 'Unable to create channels: ' + e)
+  }
+}
+
+// Reload channels when channels.json changes
+async function reloadChannels() {
+  Log(tag, 'Reloading channels...')
+
+  // Clear existing channels
+  ChannelPool().clearChannels()
+
+  // Reset PreGenerator queue
+  PreGenerator.generationQueue = []
+  PreGenerator.currentIndex = 0
+  PreGenerator.totalVideos = 0
+
+  // Load and initialize new channels
+  const channelDefinitions = loadChannels()
+  initializeChannels(channelDefinitions)
+
+  // Queue and generate any missing streams (runs in background)
+  ChannelPool().queue.forEach(channel => {
+    PreGenerator.queueChannel(channel)
+  })
+
+  // Start generation in background - don't await
+  PreGenerator.startGeneration().then(() => {
+    Log(tag, 'All HLS streams ready after reload!')
+  })
+
+  // Start broadcasting on channels that have content ready
+  ChannelPool().startBroadcast()
+
+  Log(tag, 'Channels reloaded - pre-generation running in background')
+}
+
+// Watch channels.json for changes
+function watchChannelsFile() {
+  let debounceTimer = null
+
+  fs.watch(channelsPath, (eventType) => {
+    if (eventType === 'change') {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer)
       }
-    ]
-    fs.mkdirSync(path.dirname(channelsPath), { recursive: true })
-    fs.writeFileSync(channelsPath, JSON.stringify(defaultChannels, null, 2))
-    Log(tag, `Created default channels.json. Edit ${CHANNEL_LIST} to configure your channels.`)
+      debounceTimer = setTimeout(() => {
+        Log(tag, 'channels.json changed, reloading...')
+        reloadChannels()
+      }, 1000)
+    }
+  })
+
+  Log(tag, `Watching ${channelsPath} for changes`)
+}
+
+// Startup sequence
+async function startup() {
+  // Load initial channels
+  const channelDefinitions = loadChannels()
+  initializeChannels(channelDefinitions)
+
+  // Start UI immediately (before pre-generation)
+  try {
+    TelevisionUI().start(ChannelPool())
+    uiStarted = true
+    Log(tag, 'Web UI started')
+  } catch (e) {
+    Log(tag, 'Unable to start the TV UI: ' + e)
   }
 
-  var channels = fs.readFileSync(channelsPath)
-} catch(e) {
-  Log(tag, `Couldn't read the file you provided... ${e}`)
-}
+  // Start watching for channel config changes
+  watchChannelsFile()
 
-try {
-  channels = JSON.parse(channels)
-  Log(tag, `Found ${channels.length} channel definition${channels.length>1?'s':''}:`)
-} catch(e) { 
-  Log(tag, 'Unable to process channel list: ' + e) 
-}
+  // Start broadcast (channels will show as available once they have content)
+  try {
+    ChannelPool().startBroadcast()
+  } catch (e) {
+    Log(tag, 'Unable to start the broadcast: ' + e)
+  }
 
-try {
-  channels.forEach(definition => {
-    const channel = new Channel(definition)
-    ChannelPool().addChannel(channel)
-  })
-} catch (e) {
-  Log(tag, 'Unable to create channels: ' + e)
-}
-
-// Pre-generate HLS streams
-async function startup() {
+  // Queue all channels for generation
   try {
     Log(tag, 'Checking for pre-generated HLS streams...')
 
-    // Queue all channels for generation
     ChannelPool().queue.forEach(channel => {
       PreGenerator.queueChannel(channel)
     })
 
-    // Generate any missing streams
+    // Generate any missing streams (runs in background, UI is already up)
     await PreGenerator.startGeneration()
 
     Log(tag, 'All HLS streams ready!')
 
   } catch (e) {
     Log(tag, 'Error during pre-generation: ' + e)
-  }
-
-  try {
-    const ui = TelevisionUI().start(ChannelPool())
-  } catch (e) {
-    Log(tag, 'Unable to start the TV UI: ' + e)
-  }
-
-  try {
-    ChannelPool().startBroadcast()
-  } catch (e) {
-    Log(tag, 'Unable to start the broadcast: ' + e)
   }
 }
 

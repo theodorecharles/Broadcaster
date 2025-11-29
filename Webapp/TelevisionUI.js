@@ -43,14 +43,15 @@ class TelevisionUI {
 
     this.app.use(express.static(CACHE_DIR))
     this.app.use(compression())
-    this.app.get(`/manifest.json`, function(req,res){
 
+    // Dynamic manifest - always reflects current channelPool state
+    this.app.get(`/manifest.json`, function(req,res){
         var manifest = {
           channels: [],
           upcoming: []
         }
 
-        channelPool.queue.forEach(channel => {
+        ChannelPool().queue.forEach(channel => {
           if (channel.started) {
             manifest.channels.push({
               name: channel.name,
@@ -59,48 +60,46 @@ class TelevisionUI {
           }
         })
         res.send(JSON.stringify(manifest))
-
     })
 
-    channelPool.queue.forEach((channel) => {
+    // Dynamic channel routes - matches any *.m3u8 and looks up channel by slug
+    this.app.get(`/:slug.m3u8`, function(req,res){
+        const slug = req.params.slug
+        const channel = ChannelPool().queue.find(c => c.slug === slug)
 
-      this.app.get(`/${channel.slug}.m3u8`, function(req,res){
+        if (!channel) {
+            res.statusCode = 404
+            res.send('Channel not found')
+            return
+        }
 
-          if (channel.started) {
+        if (channel.started) {
+            try {
+                const playlist = channel.getPlaylist()
 
-              try {
+                if (!playlist) {
+                    res.statusCode = 500
+                    res.send('Playlist not available')
+                    return
+                }
 
-                  const playlist = channel.getPlaylist()
+                res.set({
+                    'Content-Type': 'application/x-mpegURL',
+                    'Cache-Control': `max-age=${M3U8_MAX_AGE}`,
+                    'Cache-Control': `min-fresh=${M3U8_MAX_AGE}`,
+                    'Strict-Transport-Security': `max-age=${Date.now() + M3U8_MAX_AGE*1000}; includeSubDomains;  preload`
+                })
+                res.send(playlist)
 
-                  if (!playlist) {
-                      res.statusCode = 500
-                      res.send('Playlist not available')
-                      return
-                  }
-
-                  res.set({
-                      'Content-Type': 'application/x-mpegURL',
-                      'Cache-Control': `max-age=${M3U8_MAX_AGE}`,
-                      'Cache-Control': `min-fresh=${M3U8_MAX_AGE}`,
-                      'Strict-Transport-Security': `max-age=${Date.now() + M3U8_MAX_AGE*1000}; includeSubDomains;  preload`
-                  })
-                  res.send(playlist)
-
-              } catch(e) {
-                  Log(tag, `Couldn't return m3u8:\n` + e, channel)
-                  res.statusCode = 500
-                  res.send('')
-              }
-
-          } else {
-
-              res.statusCode = 500
-              res.send('Broadcaster HLS channel not started yet.')
-
-          }
-
-      })
-
+            } catch(e) {
+                Log(tag, `Couldn't return m3u8:\n` + e, channel)
+                res.statusCode = 500
+                res.send('')
+            }
+        } else {
+            res.statusCode = 500
+            res.send('Broadcaster HLS channel not started yet.')
+        }
     })
 
     this.app.listen(WEB_UI_PORT, async () => {
