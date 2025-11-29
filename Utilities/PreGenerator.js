@@ -36,7 +36,7 @@ class PreGenerator {
      */
     isAlreadyGenerated(filePath, channelSlug) {
         const videoHash = this.getVideoHash(filePath)
-        const outputDir = path.join(CACHE_DIR, 'broadcaster', 'channels', channelSlug, 'videos', videoHash)
+        const outputDir = path.join(CACHE_DIR, 'channels', channelSlug, 'videos', videoHash)
         const playlistPath = path.join(outputDir, 'index.m3u8')
 
         // Check if playlist exists
@@ -86,7 +86,7 @@ class PreGenerator {
     generateVideo(filePath, channel) {
         return new Promise((resolve, reject) => {
             const videoHash = this.getVideoHash(filePath)
-            const outputDir = path.join(CACHE_DIR, 'broadcaster', 'channels', channel.slug, 'videos', videoHash)
+            const outputDir = path.join(CACHE_DIR, 'channels', channel.slug, 'videos', videoHash)
             const outputPath = path.join(outputDir, 'index.m3u8')
 
             // Create output directory

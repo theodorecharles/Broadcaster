@@ -101,7 +101,7 @@ function FFMpegSession(channel) {
     const file = channel.queue[channel.currentPlaylistIndex]
     const slug = channel.slug
     const start = Date.now()
-    const output = `${CACHE_DIR}/broadcaster/channels/${slug}/_.m3u8`
+    const output = `${CACHE_DIR}/channels/${slug}/_.m3u8`
 
     const args = buildFFmpegArgs(file, output, channel)
 

@@ -1,43 +1,50 @@
-# Use NVIDIA CUDA runtime base image
+# Build stage for frontend
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /app
+
+# Copy Webapp package files and install dependencies
+COPY Webapp/package*.json ./Webapp/
+RUN cd Webapp && npm ci
+
+# Copy Webapp source and build
+COPY Webapp ./Webapp
+RUN cd Webapp && npm run build
+
+# Runtime stage
 FROM nvidia/cuda:12.6.3-runtime-ubuntu24.04
 
 # Install system dependencies and ffmpeg with NVIDIA support
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     ffmpeg \
-    && rm -rf /var/lib/apt/lists/* \
-    && ffmpeg -version
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends nodejs && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm cache clean --force
 
 # Create app directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files and install production dependencies only
 COPY package*.json ./
+RUN npm ci --only=production && npm cache clean --force
 
-# Install Node dependencies
-RUN npm ci --only=production
-
-# Copy Webapp package files and install dependencies
-COPY Webapp/package*.json ./Webapp/
-RUN cd Webapp && npm ci --only=production && npm ci --only=dev
-
-# Copy application code
-COPY . .
-
-# Copy Docker-specific config
+# Copy application code (excluding Webapp source, only need built files)
+COPY Classes ./Classes
+COPY Utilities ./Utilities
+COPY Broadcaster.js ./
 COPY config.docker.txt ./config.txt
 
-# Build the React frontend
-RUN cd Webapp && npm run build
+# Copy built frontend from builder stage
+COPY --from=frontend-builder /app/Webapp/dist ./Webapp/dist
+COPY Webapp/TelevisionUI.js ./Webapp/
 
 # Create broadcaster user with UID 99 (nobody) and GID 100 (users)
-# These are standard Unraid user/group IDs
 RUN groupadd -g 100 users || true && \
     useradd -u 99 -g 100 -m -s /bin/bash broadcaster
 
@@ -45,7 +52,7 @@ RUN groupadd -g 100 users || true && \
 RUN mkdir -p /data /media && \
     chown -R 99:100 /data /media /app
 
-# Environment variables (can be overridden by docker-compose or docker run)
+# Environment variables
 ENV CACHE_DIR=/data
 ENV CHANNEL_LIST=/data/channels.json
 ENV NODE_ENV=production
