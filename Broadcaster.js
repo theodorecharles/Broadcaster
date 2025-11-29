@@ -109,7 +109,7 @@ function watchChannelsFile() {
     Log(tag, `Could not stat ${channelsPath}: ${e.message}`)
   }
 
-  // Poll every 5 seconds
+  // Poll every 5 minutes
   setInterval(() => {
     try {
       const currentMtime = fs.statSync(channelsPath).mtimeMs
@@ -123,9 +123,9 @@ function watchChannelsFile() {
     } catch (e) {
       // File might be temporarily unavailable during write
     }
-  }, 5000)
+  }, 5 * 60 * 1000)
 
-  Log(tag, `Watching ${channelsPath} for changes (polling every 5s)`)
+  Log(tag, `Watching ${channelsPath} for changes (polling every 5 minutes)`)
 }
 
 // Startup sequence
