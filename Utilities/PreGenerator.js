@@ -1,4 +1,4 @@
-const { spawn } = require('child_process')
+const { spawn, execSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const Log = require('./Log.js')
@@ -14,6 +14,26 @@ const { CACHE_DIR,
         AUDIO_BITRATE,
         HLS_SEGMENT_LENGTH_SECONDS,
         DIMENSIONS } = process.env
+
+// Check if NVIDIA GPU is available
+let hasNvidiaGPU = false
+let gpuCheckDone = false
+
+function checkNvidiaGPU() {
+    if (gpuCheckDone) return hasNvidiaGPU
+
+    try {
+        execSync('nvidia-smi', { stdio: 'ignore' })
+        hasNvidiaGPU = true
+        Log(tag, 'NVIDIA GPU detected - hardware acceleration enabled')
+    } catch (error) {
+        hasNvidiaGPU = false
+        Log(tag, 'No NVIDIA GPU detected - using software encoding')
+    }
+
+    gpuCheckDone = true
+    return hasNvidiaGPU
+}
 
 class PreGenerator {
 
@@ -92,16 +112,45 @@ class PreGenerator {
             // Create output directory
             fs.mkdirSync(outputDir, { recursive: true })
 
-            // Build video filter with scale that maintains aspect ratio
+            const useGPU = checkNvidiaGPU()
             const [width, height] = DIMENSIONS.split('x')
-            const videoFilter = `${VIDEO_FILTER},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
+
+            // Determine codec, filter, and settings based on GPU availability
+            let videoCodec = VIDEO_CODEC
+            let videoPreset = VIDEO_PRESET
+            let videoFilter = VIDEO_FILTER
+            let inputArgs = ['-i', filePath]
+            let qualityArgs = ['-crf', VIDEO_CRF]
+
+            let fullVideoFilter
+
+            if (useGPU && VIDEO_CODEC === 'h264_nvenc') {
+                // Use NVIDIA hardware decoding and encoding
+                inputArgs = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-i', filePath]
+                videoCodec = 'h264_nvenc'
+                videoPreset = VIDEO_PRESET || 'p4'
+                // NVENC uses -cq instead of -crf
+                qualityArgs = ['-cq', VIDEO_CRF || '23', '-rc', 'vbr', '-b:v', '0']
+                // Full CUDA filter chain - keeps everything on GPU
+                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif_cuda,' : ''
+                fullVideoFilter = `${deinterlace}scale_cuda=${width}:${height}:force_original_aspect_ratio=decrease,hwdownload,format=nv12,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
+            } else if (!useGPU && VIDEO_CODEC === 'h264_nvenc') {
+                // Fallback to software encoding
+                videoCodec = 'libx264'
+                videoPreset = 'veryfast'
+                fullVideoFilter = `yadif,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
+                Log(tag, 'GPU requested but not available - falling back to software encoding', channel)
+            } else {
+                // CPU encoding path
+                fullVideoFilter = `${videoFilter},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
+            }
 
             const args = [
-                '-i', filePath,
-                '-vf', videoFilter,
-                '-c:v', VIDEO_CODEC,
-                '-preset', VIDEO_PRESET,
-                '-crf', VIDEO_CRF,
+                ...inputArgs,
+                '-vf', fullVideoFilter,
+                '-c:v', videoCodec,
+                '-preset', videoPreset,
+                ...qualityArgs,
                 '-profile:v', 'main',
                 '-level', '3.1',
                 '-pix_fmt', 'yuv420p',
