@@ -101,6 +101,28 @@ class PreGenerator {
     }
 
     /**
+     * Get video file info using ffprobe
+     */
+    getVideoInfo(filePath) {
+        try {
+            const result = execSync(
+                `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,pix_fmt,width,height,bit_depth -of csv=p=0 "${filePath}"`,
+                { encoding: 'utf8', timeout: 10000 }
+            )
+            const parts = result.trim().split(',')
+            return {
+                codec: parts[0] || 'unknown',
+                width: parts[1] || 'unknown',
+                height: parts[2] || 'unknown',
+                pixFmt: parts[3] || 'unknown',
+                bitDepth: parts[4] || '8'
+            }
+        } catch (e) {
+            return { codec: 'error', width: '?', height: '?', pixFmt: '?', bitDepth: '?' }
+        }
+    }
+
+    /**
      * Generate HLS files for a single video
      */
     generateVideo(filePath, channel) {
@@ -111,6 +133,10 @@ class PreGenerator {
 
             // Create output directory
             fs.mkdirSync(outputDir, { recursive: true })
+
+            // Log video info before transcoding
+            const videoInfo = this.getVideoInfo(filePath)
+            Log(tag, `Processing ${path.basename(filePath)} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit]`, channel)
 
             const useGPU = checkNvidiaGPU()
             const [width, height] = DIMENSIONS.split('x')
