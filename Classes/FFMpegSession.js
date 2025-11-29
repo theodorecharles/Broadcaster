@@ -35,6 +35,7 @@ function checkNvidiaGPU() {
 
 function buildFFmpegArgs(file, output, channel) {
     const useGPU = checkNvidiaGPU()
+    const [width, height] = DIMENSIONS.split('x')
 
     // Base input args with GPU decoding if available
     const inputArgs = useGPU
@@ -44,26 +45,30 @@ function buildFFmpegArgs(file, output, channel) {
     // Determine video codec and preset based on GPU availability
     let videoCodec = VIDEO_CODEC
     let videoPreset = VIDEO_PRESET
-    let videoFilter = VIDEO_FILTER
+    let videoFilter
 
     if (useGPU && VIDEO_CODEC === 'h264_nvenc') {
         // NVIDIA GPU encoding settings
         videoCodec = 'h264_nvenc'
         // NVENC presets: p1 (fastest) to p7 (slowest/best quality)
         videoPreset = VIDEO_PRESET || 'p4'
-        // Use CUDA-accelerated deinterlacing if yadif is specified
-        videoFilter = VIDEO_FILTER === 'yadif' ? 'yadif_cuda' : VIDEO_FILTER
+        // Full CUDA filter chain - keeps everything on GPU
+        const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif_cuda,' : ''
+        videoFilter = `${deinterlace}scale_cuda=${width}:${height},hwdownload,format=nv12`
     } else if (!useGPU && VIDEO_CODEC === 'h264_nvenc') {
         // Fallback to software encoding if NVENC requested but GPU not available
         videoCodec = 'libx264'
         videoPreset = 'veryfast'
-        videoFilter = 'yadif'
+        videoFilter = `yadif,scale=${DIMENSIONS}`
         Log(tag, 'GPU requested but not available - falling back to software encoding', channel)
+    } else {
+        // CPU encoding path
+        videoFilter = `${VIDEO_FILTER},scale=${DIMENSIONS}`
     }
 
     // Build encoding args
     const encodingArgs = [
-        '-vf', `${videoFilter},scale=${DIMENSIONS}`,
+        '-vf', videoFilter,
         '-c:v', videoCodec,
         '-preset', videoPreset
     ]

@@ -122,25 +122,28 @@ class PreGenerator {
             let inputArgs = ['-i', filePath]
             let qualityArgs = ['-crf', VIDEO_CRF]
 
+            let fullVideoFilter
+
             if (useGPU && VIDEO_CODEC === 'h264_nvenc') {
                 // Use NVIDIA hardware decoding and encoding
                 inputArgs = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-i', filePath]
                 videoCodec = 'h264_nvenc'
                 videoPreset = VIDEO_PRESET || 'p4'
-                // Use CUDA-accelerated filters
-                videoFilter = VIDEO_FILTER === 'yadif' ? 'yadif_cuda' : VIDEO_FILTER
                 // NVENC uses -cq instead of -crf
                 qualityArgs = ['-cq', VIDEO_CRF || '23', '-rc', 'vbr', '-b:v', '0']
+                // Full CUDA filter chain - keeps everything on GPU
+                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif_cuda,' : ''
+                fullVideoFilter = `${deinterlace}scale_cuda=${width}:${height}:force_original_aspect_ratio=decrease,hwdownload,format=nv12,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
             } else if (!useGPU && VIDEO_CODEC === 'h264_nvenc') {
                 // Fallback to software encoding
                 videoCodec = 'libx264'
                 videoPreset = 'veryfast'
-                videoFilter = 'yadif'
+                fullVideoFilter = `yadif,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
                 Log(tag, 'GPU requested but not available - falling back to software encoding', channel)
+            } else {
+                // CPU encoding path
+                fullVideoFilter = `${videoFilter},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
             }
-
-            // Build video filter with scale
-            const fullVideoFilter = `${videoFilter},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
 
             const args = [
                 ...inputArgs,
