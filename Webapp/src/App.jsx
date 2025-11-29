@@ -15,7 +15,6 @@ function App() {
   const [showChannelOverlay, setShowChannelOverlay] = useState(false)
   const [showVolumeOverlay, setShowVolumeOverlay] = useState(false)
   const [powerAnimation, setPowerAnimation] = useState(null)
-  const [scanlinesEnabled, setScanlinesEnabled] = useState(true)
 
   // Load channels
   useEffect(() => {
@@ -246,7 +245,7 @@ function App() {
   return (
     <div className="tv-container">
       <div className="video-wrapper">
-        <div className={`video-content ${powerAnimation || ''} ${scanlinesEnabled ? 'scanlines' : ''}`}>
+        <div className={`video-content ${powerAnimation || ''}`}>
           <video
             ref={videoRef}
             onClick={() => videoRef.current.muted = false}
@@ -309,16 +308,6 @@ function App() {
           <svg viewBox="0 0 28 24" width="28" height="24">
             <path d="M3 9v6h4l5 5V4L7 9H3z" fill="currentColor"/>
             <path d="M23 11h-2V9h-2v2h-2v2h2v2h2v-2h2z" fill="currentColor"/>
-          </svg>
-        </button>
-        <button onClick={() => setScanlinesEnabled(!scanlinesEnabled)} title="Scanlines">
-          <svg viewBox="0 0 24 24" width="24" height="24">
-            <rect x="2" y="2" width="20" height="20" rx="2" fill="none" stroke="currentColor" strokeWidth="2"/>
-            <line x1="4" y1="6" x2="20" y2="6" stroke="currentColor" strokeWidth="1"/>
-            <line x1="4" y1="9" x2="20" y2="9" stroke="currentColor" strokeWidth="1"/>
-            <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" strokeWidth="1"/>
-            <line x1="4" y1="15" x2="20" y2="15" stroke="currentColor" strokeWidth="1"/>
-            <line x1="4" y1="18" x2="20" y2="18" stroke="currentColor" strokeWidth="1"/>
           </svg>
         </button>
         <button onClick={toggleFullscreen} title="Fullscreen">
