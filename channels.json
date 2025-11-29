@@ -1,29 +1,6 @@
 [{
   "type": "shuffle",
-  "name": "PBS",
-  "slug": "pbs",
-  "paths": [
-    "/mnt/user/TV Shows/This Old House",
-    "/mnt/user/TV Shows/The New Yankee Workshop",
-    "/mnt/user/TV Shows/California's Gold",
-    "/mnt/user/TV Shows/Antiques Roadshow (US)",
-    "/mnt/user/TV Shows/Bob Ross - The Joy of Painting",
-    "/mnt/user/TV Shows/Mister Rogers Neighborhood",
-    "/mnt/user/TV Shows/Carl Sagan's Cosmos",
-    "/mnt/user/TV Shows/Keeping Up Appearances"
-  ]
-},{
-  "type": "shuffle",
-  "name": "Trek TV",
-  "slug": "startrektv",
-  "paths": [
-    "/mnt/user/TV Shows/Star Trek The Next Generation",
-    "/mnt/user/TV Shows/Star Trek - The Animated Series",
-    "/mnt/user/TV Shows/Star Trek - The Original Series Remastered"
-  ]
-},{
-  "type": "shuffle",
-  "name": "Trek Movies",
+  "name": "Star Trek Movies",
   "slug": "startrek",
   "paths": [
     "/mnt/user/Movies/Star Trek (2009)",
@@ -37,30 +14,28 @@
     "/mnt/user/Movies/Star Trek IV - The Voyage Home (1986)",
     "/mnt/user/Movies/Star Trek - Nemesis (2002)",
     "/mnt/user/Movies/Star Trek - Renegades (2015)",
-    "/mnt/user/Movies/Star Trek The Motion Picture (1979)",
+    "/mnt/user/Movies/Star Trek - The Motion Picture (1979)",
     "/mnt/user/Movies/Star Trek VI - The Undiscovered Country (1991)",
     "/mnt/user/Movies/Star Trek V - The Final Frontier (1989)"
   ]
-},{
+},
+{
   "type": "shuffle",
-  "name": "Frasier",
-  "slug": "frasier",
+  "name": "Star Trek TV",
+  "slug": "startrektv",
   "paths": [
-    "/mnt/user/TV Shows/Frasier"
-  ]
-},{
-  "type": "shuffle",
-  "name": "MTV Simulator",
-  "slug": "mtv",
-  "paths": [
-    "/mnt/user/Music Videos",
-    "/mnt/user/TV Shows/Beavis & Butthead"
-  ]
-},{
-  "type": "shuffle",
-  "name": "Food Network",
-  "slug": "food",
-  "paths": [
-    "/mnt/user/TV Shows/Diners Drive-Ins and Dives"
+    "/mnt/user/TV Shows/Star Trek Continues",
+    "/mnt/user/TV Shows/Star Trek - Deep Space 9",
+    "/mnt/user/TV Shows/Star Trek Discovery",
+    "/mnt/user/TV Shows/Star Trek - Enterprise",
+    "/mnt/user/TV Shows/Star Trek - Lower Decks",
+    "/mnt/user/TV Shows/Star Trek- Picard",
+    "/mnt/user/TV Shows/Star Trek- Short Treks",
+    "/mnt/user/TV Shows/Star Trek - Strange New Worlds",
+    "/mnt/user/TV Shows/Star Trek - The Animated Series",
+    "/mnt/user/TV Shows/Star Trek - The Next Generation",
+    "/mnt/user/TV Shows/Star Trek The Next Generation",
+    "/mnt/user/TV Shows/Star Trek - The Original Series",
+    "/mnt/user/TV Shows/Star Trek - Voyager"
   ]
 }]

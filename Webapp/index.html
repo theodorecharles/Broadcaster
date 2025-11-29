@@ -23,25 +23,45 @@ body {
   padding-top: 30px;
 }
 </style>
-<title>Tedflix TV</title>
+<title>Broadcaster</title>
 </head>
 <body>
   <div id="container">
-    <video id="video" autoplay="true" muted="muted" src></video>
-    <nav>
-      <button id="mtv" class="channel">MTV Simulator</button>
-      <button id="food" class="channel">Food Network</button>
-      <button id="pbs" class="channel">PBS</button>
-      <button id="frasier" class="channel">Frasier</button>
-      <button id="startrektv" class="channel">Trek TV</button>
-      <button id="startrek" class="channel">Trek Movies</button>
+    <video id="video" autoplay="true" muted="muted"></video>
+    <nav id="channel-nav">
+      <!-- Channels will be loaded dynamically -->
       <button id="fullscreen">Fullscreen</button>
     </nav>
   </div>
   <script>
-    if (window.safari && navigator.userAgent.toLowerCase().indexOf('chrome') == -1) {
+    // Load channels dynamically from manifest
+    fetch('/manifest.json')
+      .then(response => response.json())
+      .then(manifest => {
+        const nav = document.getElementById('channel-nav');
+        const fullscreenButton = document.getElementById('fullscreen');
+
+        manifest.channels.forEach(channel => {
+          const button = document.createElement('button');
+          button.id = channel.slug;
+          button.className = 'channel';
+          button.textContent = channel.name;
+          nav.insertBefore(button, fullscreenButton);
+        });
+
+        // Initialize video player after channels are loaded
+        const firstChannel = manifest.channels.length > 0 ? manifest.channels[0].slug : null;
+        initializePlayer(firstChannel);
+      })
+      .catch(err => {
+        console.error('Failed to load channels:', err);
+        initializePlayer(null);
+      });
+
+    function initializePlayer(defaultChannel) {
+      if (window.safari && navigator.userAgent.toLowerCase().indexOf('chrome') == -1) {
       var video = document.getElementById('video');
-      video.src = `/channels/static/_.m3u8`;
+      video.src = defaultChannel ? `/${defaultChannel}.m3u8` : `/channels/static/_.m3u8`;
       document.querySelectorAll('button.channel')
         .forEach((button) => button.addEventListener('click', () => {
           video.src = '#';
@@ -65,8 +85,31 @@ body {
       var video = document.getElementById('video');
       window.hls = new Hls();
       window.hls.config.liveDurationInfinity = true
-      window.hls.loadSource(`/channels/static/_.m3u8`);
+      window.hls.loadSource(defaultChannel ? `/${defaultChannel}.m3u8` : `/channels/static/_.m3u8`);
       window.hls.attachMedia(video);
+
+      // Add error handling
+      window.hls.on(Hls.Events.ERROR, function(event, data) {
+        console.error('HLS error:', data);
+        if (data.fatal) {
+          switch(data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              console.log('Network error, trying to recover...');
+              window.hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              console.log('Media error, trying to recover...');
+              window.hls.recoverMediaError();
+              break;
+            default:
+              console.log('Fatal error, destroying and recreating player...');
+              window.hls.destroy();
+              window.location.reload();
+              break;
+          }
+        }
+      });
+
       video.addEventListener('click',function() {
         video.muted = false;
       });
@@ -78,7 +121,7 @@ body {
           window.hls = null
           window.hls = new Hls();
           window.hls.config.liveDurationInfinity = true
-          window.hls.addListener('hlsBufferCreated', ()=>{
+          window.hls.on(Hls.Events.FRAG_BUFFERED, ()=>{
             video.style.background = "black";
             video.style.backgroundImage = "none";
           });
@@ -93,6 +136,7 @@ body {
         .forEach((el) => el.addEventListener('mouseover', () => {
           video.muted = false;
         }))
+      }
     }
   </script>
 </body>

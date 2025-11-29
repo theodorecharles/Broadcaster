@@ -5,17 +5,20 @@
   "main": "broadcaster.js",
   "scripts": {
     "start": "node Broadcaster.js",
-    "test": "node Broadcaster.js"
+    "test": "node Broadcaster.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop broadcaster",
+    "pm2:restart": "pm2 restart broadcaster",
+    "pm2:delete": "pm2 delete broadcaster",
+    "pm2:logs": "pm2 logs broadcaster",
+    "pm2:monit": "pm2 monit"
   },
-  "author": "Theodore Roddy",
+  "author": "Ted Charles",
   "license": "ISC",
   "dependencies": {
-    "compression": "^1.7.4",
-    "dotenv": "^8.2.0",
-    "express": "^4.17.1",
-    "expressjs": "^1.0.1",
-    "fluent-ffmpeg": "^2.1.2",
-    "fs": "0.0.1-security"
+    "compression": "^1.8.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0"
   },
   "repository": {
     "type": "git",
