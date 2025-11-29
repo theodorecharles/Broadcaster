@@ -69,7 +69,6 @@ class PlaylistManager {
             const playlistPath = this.getVideoPlaylistPath(filePath)
 
             if (!fs.existsSync(playlistPath)) {
-                Log(tag, `Skipping ${path.basename(filePath)} (not generated)`, this.channel)
                 return
             }
 
