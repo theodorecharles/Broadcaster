@@ -101,6 +101,43 @@ class PreGenerator {
     }
 
     /**
+     * Get video file info using ffprobe
+     */
+    getVideoInfo(filePath) {
+        try {
+            // Get video stream info
+            const videoResult = execSync(
+                `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,pix_fmt,width,height,bit_depth -of csv=p=0 "${filePath}"`,
+                { encoding: 'utf8', timeout: 10000 }
+            )
+            const videoParts = videoResult.trim().split(',')
+
+            // Get audio stream info
+            let audioCodec = 'unknown'
+            try {
+                const audioResult = execSync(
+                    `ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "${filePath}"`,
+                    { encoding: 'utf8', timeout: 10000 }
+                )
+                audioCodec = audioResult.trim() || 'unknown'
+            } catch (e) {
+                audioCodec = 'none'
+            }
+
+            return {
+                codec: videoParts[0] || 'unknown',
+                width: videoParts[1] || 'unknown',
+                height: videoParts[2] || 'unknown',
+                pixFmt: videoParts[3] || 'unknown',
+                bitDepth: videoParts[4] || '8',
+                audioCodec: audioCodec
+            }
+        } catch (e) {
+            return { codec: 'error', width: '?', height: '?', pixFmt: '?', bitDepth: '?', audioCodec: '?' }
+        }
+    }
+
+    /**
      * Generate HLS files for a single video
      */
     generateVideo(filePath, channel) {
@@ -112,38 +149,57 @@ class PreGenerator {
             // Create output directory
             fs.mkdirSync(outputDir, { recursive: true })
 
-            const useGPU = checkNvidiaGPU()
-            const [width, height] = DIMENSIONS.split('x')
+            // Log video info before transcoding
+            const videoInfo = this.getVideoInfo(filePath)
+            Log(tag, `Processing ${path.basename(filePath)} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit | audio: ${videoInfo.audioCodec}]`, channel)
 
-            // Determine codec, filter, and settings based on GPU availability
-            let videoCodec = VIDEO_CODEC
-            let videoPreset = VIDEO_PRESET
-            let videoFilter = VIDEO_FILTER
-            let inputArgs = ['-i', filePath]
-            let qualityArgs = ['-crf', VIDEO_CRF]
+            const hasGPU = checkNvidiaGPU()
+            const [width] = DIMENSIONS.split('x')
 
-            let fullVideoFilter
+            // Check if this file can use GPU - 10-bit and some codecs don't work well with CUDA filters
+            const is10Bit = videoInfo.pixFmt && (videoInfo.pixFmt.includes('10') || videoInfo.bitDepth === '10')
+            const gpuCompatibleCodecs = ['h264', 'hevc', 'vp9', 'av1', 'mpeg2video', 'mpeg4']
+            const canUseGPU = hasGPU &&
+                              VIDEO_CODEC === 'h264_nvenc' &&
+                              !is10Bit &&
+                              gpuCompatibleCodecs.includes(videoInfo.codec)
 
-            if (useGPU && VIDEO_CODEC === 'h264_nvenc') {
-                // Use NVIDIA hardware decoding and encoding
+            // Determine codec, filter, and settings
+            let videoCodec, videoPreset, inputArgs, qualityArgs, fullVideoFilter
+
+            if (canUseGPU) {
+                // Full GPU path: NVDEC decode + CUDA filters + NVENC encode
                 inputArgs = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-i', filePath]
                 videoCodec = 'h264_nvenc'
                 videoPreset = VIDEO_PRESET || 'p4'
-                // NVENC uses -cq instead of -crf
                 qualityArgs = ['-cq', VIDEO_CRF || '23', '-rc', 'vbr', '-b:v', '0']
-                // Full CUDA filter chain - keeps everything on GPU
+                // Scale to width, maintain aspect ratio (height = -2 ensures divisible by 2)
                 const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif_cuda,' : ''
-                fullVideoFilter = `${deinterlace}scale_cuda=${width}:${height}:force_original_aspect_ratio=decrease,hwdownload,format=nv12,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
-            } else if (!useGPU && VIDEO_CODEC === 'h264_nvenc') {
-                // Fallback to software encoding
-                videoCodec = 'libx264'
-                videoPreset = 'veryfast'
-                fullVideoFilter = `yadif,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
-                Log(tag, 'GPU requested but not available - falling back to software encoding', channel)
+                fullVideoFilter = `${deinterlace}scale_cuda=${width}:-2,hwdownload,format=nv12`
+            } else if (hasGPU && VIDEO_CODEC === 'h264_nvenc') {
+                // Hybrid path: CPU decode + CPU filters + NVENC encode (for incompatible files)
+                inputArgs = ['-i', filePath]
+                videoCodec = 'h264_nvenc'
+                videoPreset = VIDEO_PRESET || 'p4'
+                qualityArgs = ['-cq', VIDEO_CRF || '23', '-rc', 'vbr', '-b:v', '0']
+                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif,' : ''
+                fullVideoFilter = `${deinterlace}scale=${width}:-2`
+                Log(tag, `Using CPU decode for ${path.basename(filePath)} (${is10Bit ? '10-bit' : 'incompatible codec'})`, channel)
             } else {
-                // CPU encoding path
-                fullVideoFilter = `${videoFilter},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
+                // Full CPU path
+                inputArgs = ['-i', filePath]
+                videoCodec = 'libx264'
+                videoPreset = VIDEO_PRESET || 'veryfast'
+                qualityArgs = ['-crf', VIDEO_CRF || '23']
+                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif,' : ''
+                fullVideoFilter = `${deinterlace}scale=${width}:-2`
             }
+
+            // Determine audio handling - copy if already AAC, otherwise re-encode
+            const canCopyAudio = videoInfo.audioCodec === 'aac'
+            const audioArgs = canCopyAudio
+                ? ['-c:a', 'copy']
+                : ['-c:a', AUDIO_CODEC, '-b:a', AUDIO_BITRATE, '-ac', '2']
 
             const args = [
                 ...inputArgs,
@@ -154,9 +210,7 @@ class PreGenerator {
                 '-profile:v', 'main',
                 '-level', '3.1',
                 '-pix_fmt', 'yuv420p',
-                '-c:a', AUDIO_CODEC,
-                '-b:a', AUDIO_BITRATE,
-                '-ac', '2',
+                ...audioArgs,
                 '-hls_time', HLS_SEGMENT_LENGTH_SECONDS,
                 '-hls_list_size', '0',
                 '-hls_segment_filename', path.join(outputDir, 'segment_%05d.ts'),
