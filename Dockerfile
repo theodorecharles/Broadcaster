@@ -30,6 +30,9 @@ RUN cd Webapp && npm ci --only=production && npm ci --only=dev
 # Copy application code
 COPY . .
 
+# Copy Docker-specific config
+COPY config.docker.txt ./config.txt
+
 # Build the React frontend
 RUN cd Webapp && npm run build
 
