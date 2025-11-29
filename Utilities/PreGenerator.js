@@ -153,37 +153,46 @@ class PreGenerator {
             const videoInfo = this.getVideoInfo(filePath)
             Log(tag, `Processing ${path.basename(filePath)} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit | audio: ${videoInfo.audioCodec}]`, channel)
 
-            const useGPU = checkNvidiaGPU()
-            const [width, height] = DIMENSIONS.split('x')
+            const hasGPU = checkNvidiaGPU()
+            const [width] = DIMENSIONS.split('x')
 
-            // Determine codec, filter, and settings based on GPU availability
-            let videoCodec = VIDEO_CODEC
-            let videoPreset = VIDEO_PRESET
-            let videoFilter = VIDEO_FILTER
-            let inputArgs = ['-i', filePath]
-            let qualityArgs = ['-crf', VIDEO_CRF]
+            // Check if this file can use GPU - 10-bit and some codecs don't work well with CUDA filters
+            const is10Bit = videoInfo.pixFmt && (videoInfo.pixFmt.includes('10') || videoInfo.bitDepth === '10')
+            const gpuCompatibleCodecs = ['h264', 'hevc', 'vp9', 'av1', 'mpeg2video', 'mpeg4']
+            const canUseGPU = hasGPU &&
+                              VIDEO_CODEC === 'h264_nvenc' &&
+                              !is10Bit &&
+                              gpuCompatibleCodecs.includes(videoInfo.codec)
 
-            let fullVideoFilter
+            // Determine codec, filter, and settings
+            let videoCodec, videoPreset, inputArgs, qualityArgs, fullVideoFilter
 
-            if (useGPU && VIDEO_CODEC === 'h264_nvenc') {
-                // Use NVIDIA hardware decoding and encoding
+            if (canUseGPU) {
+                // Full GPU path: NVDEC decode + CUDA filters + NVENC encode
                 inputArgs = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-i', filePath]
                 videoCodec = 'h264_nvenc'
                 videoPreset = VIDEO_PRESET || 'p4'
-                // NVENC uses -cq instead of -crf
                 qualityArgs = ['-cq', VIDEO_CRF || '23', '-rc', 'vbr', '-b:v', '0']
-                // Full CUDA filter chain - keeps everything on GPU
+                // Scale to width, maintain aspect ratio (height = -2 ensures divisible by 2)
                 const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif_cuda,' : ''
-                fullVideoFilter = `${deinterlace}scale_cuda=${width}:${height}:force_original_aspect_ratio=decrease,hwdownload,format=nv12,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
-            } else if (!useGPU && VIDEO_CODEC === 'h264_nvenc') {
-                // Fallback to software encoding
-                videoCodec = 'libx264'
-                videoPreset = 'veryfast'
-                fullVideoFilter = `yadif,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
-                Log(tag, 'GPU requested but not available - falling back to software encoding', channel)
+                fullVideoFilter = `${deinterlace}scale_cuda=${width}:-2,hwdownload,format=nv12`
+            } else if (hasGPU && VIDEO_CODEC === 'h264_nvenc') {
+                // Hybrid path: CPU decode + CPU filters + NVENC encode (for incompatible files)
+                inputArgs = ['-i', filePath]
+                videoCodec = 'h264_nvenc'
+                videoPreset = VIDEO_PRESET || 'p4'
+                qualityArgs = ['-cq', VIDEO_CRF || '23', '-rc', 'vbr', '-b:v', '0']
+                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif,' : ''
+                fullVideoFilter = `${deinterlace}scale=${width}:-2`
+                Log(tag, `Using CPU decode for ${path.basename(filePath)} (${is10Bit ? '10-bit' : 'incompatible codec'})`, channel)
             } else {
-                // CPU encoding path
-                fullVideoFilter = `${videoFilter},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`
+                // Full CPU path
+                inputArgs = ['-i', filePath]
+                videoCodec = 'libx264'
+                videoPreset = VIDEO_PRESET || 'veryfast'
+                qualityArgs = ['-crf', VIDEO_CRF || '23']
+                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif,' : ''
+                fullVideoFilter = `${deinterlace}scale=${width}:-2`
             }
 
             // Determine audio handling - copy if already AAC, otherwise re-encode
