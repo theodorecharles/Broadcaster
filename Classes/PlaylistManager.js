@@ -25,7 +25,7 @@ class PlaylistManager {
      */
     getVideoPlaylistPath(filePath) {
         const videoHash = this.getVideoHash(filePath)
-        return path.join(CACHE_DIR, 'broadcaster', 'channels', this.channel.slug, 'videos', videoHash, 'index.m3u8')
+        return path.join(CACHE_DIR, 'channels', this.channel.slug, 'videos', videoHash, 'index.m3u8')
     }
 
     /**

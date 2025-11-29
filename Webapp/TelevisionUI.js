@@ -28,8 +28,7 @@ class TelevisionUI {
   start(channelPool) {
 
     // Create directories and copy static files
-    const broadcasterDir = path.join(CACHE_DIR, 'broadcaster')
-    const channelsDir = path.join(broadcasterDir, 'channels')
+    const channelsDir = path.join(CACHE_DIR, 'channels')
 
     fs.mkdirSync(channelsDir, { recursive: true })
 
@@ -37,12 +36,12 @@ class TelevisionUI {
     fs.cpSync(path.join(__dirname, 'static'), path.join(channelsDir, 'static'), { recursive: true })
 
     // Copy built React app (dist folder)
-    fs.cpSync(path.join(__dirname, 'dist'), broadcasterDir, { recursive: true, force: true })
+    fs.cpSync(path.join(__dirname, 'dist'), CACHE_DIR, { recursive: true, force: true })
 
     // Copy static.gif
-    fs.copyFileSync(path.join(__dirname, 'static.gif'), path.join(broadcasterDir, 'static.gif'))
+    fs.copyFileSync(path.join(__dirname, 'static.gif'), path.join(CACHE_DIR, 'static.gif'))
 
-    this.app.use(express.static(`${CACHE_DIR}/broadcaster`))
+    this.app.use(express.static(CACHE_DIR))
     this.app.use(compression())
     this.app.get(`/manifest.json`, function(req,res){
 
