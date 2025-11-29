@@ -4,13 +4,13 @@ const Log = require('../Utilities/Log.js')
 const tag = 'TelevisionUI'
 const compression = require('compression')
 
-const { WEB_UI_PORT, 
-        MANIFEST_UPCOMING_COUNT, 
+const { WEB_UI_PORT,
+        MANIFEST_UPCOMING_COUNT,
         M3U8_MAX_AGE,
         CACHE_DIR } = process.env
-        
-const Bash = require('child_process').execSync
+
 const fs = require('fs')
+const path = require('path')
 const ChannelPool = require('../Utilities/ChannelPool.js')
 
 // express app that listens on specified port and handles GET requests for .m3u8 files
@@ -26,11 +26,21 @@ class TelevisionUI {
   }
 
   start(channelPool) {
-    
-    Bash(`cp -r ${__dirname}/static ${CACHE_DIR}/broadcaster/channels/\n` +
-         `cp ${__dirname}/index.html ${CACHE_DIR}/broadcaster/\n` +
-         `cp ${__dirname}/favicon.ico ${CACHE_DIR}/broadcaster/\n` +
-         `cp ${__dirname}/static.gif ${CACHE_DIR}/broadcaster/ &`)
+
+    // Create directories and copy static files
+    const broadcasterDir = path.join(CACHE_DIR, 'broadcaster')
+    const channelsDir = path.join(broadcasterDir, 'channels')
+
+    fs.mkdirSync(channelsDir, { recursive: true })
+
+    // Copy static directory
+    fs.cpSync(path.join(__dirname, 'static'), path.join(channelsDir, 'static'), { recursive: true })
+
+    // Copy built React app (dist folder)
+    fs.cpSync(path.join(__dirname, 'dist'), broadcasterDir, { recursive: true, force: true })
+
+    // Copy static.gif
+    fs.copyFileSync(path.join(__dirname, 'static.gif'), path.join(broadcasterDir, 'static.gif'))
 
     this.app.use(express.static(`${CACHE_DIR}/broadcaster`))
     this.app.use(compression())
@@ -42,14 +52,11 @@ class TelevisionUI {
         }
 
         channelPool.queue.forEach(channel => {
-          if (channel.timeline.started) {
+          if (channel.started) {
             manifest.channels.push({
               name: channel.name,
               slug: channel.slug
             })
-            if (manifest.upcoming.length <= MANIFEST_UPCOMING_COUNT) {
-
-            }
           }
         })
         res.send(JSON.stringify(manifest))
@@ -60,24 +67,25 @@ class TelevisionUI {
 
       this.app.get(`/${channel.slug}.m3u8`, function(req,res){
 
-          if (channel.timeline.started) {
-
-              const offset = Date.now() - channel.timeline.startTime
+          if (channel.started) {
 
               try {
-                  
-                  var stream = channel.m3u8
-                  stream = stream.toString().replace(/\#EXT\-X\-PLAYLIST\-TYPE\:EVENT\n/,`#EXT-X-PLAYLIST-TYPE:EVENT\n#EXT-X-START:TIME-OFFSET=${offset/1000}\n`)
-                  stream = stream.toString().replace(/\#EXT\-X\-ENDLIST\n/g, '')
-                  stream = stream.toString().replace(/\#EXT\-X\-DISCONTINUITY\n/g, '')
-                  stream = stream.replace(/\n_/g,`\nchannels/${channel.slug}/_`)
+
+                  const playlist = channel.getPlaylist()
+
+                  if (!playlist) {
+                      res.statusCode = 500
+                      res.send('Playlist not available')
+                      return
+                  }
+
                   res.set({
                       'Content-Type': 'application/x-mpegURL',
                       'Cache-Control': `max-age=${M3U8_MAX_AGE}`,
                       'Cache-Control': `min-fresh=${M3U8_MAX_AGE}`,
                       'Strict-Transport-Security': `max-age=${Date.now() + M3U8_MAX_AGE*1000}; includeSubDomains;  preload`
                   })
-                  res.send(stream)
+                  res.send(playlist)
 
               } catch(e) {
                   Log(tag, `Couldn't return m3u8:\n` + e, channel)

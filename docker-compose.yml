@@ -1,0 +1,72 @@
+services:
+  broadcaster:
+    # Use pre-built image from Docker Hub
+    image: theodoreroddy/broadcaster:latest
+
+    # Or build locally (uncomment the line below and comment out the image line above)
+    # build: .
+
+    container_name: broadcaster
+    restart: unless-stopped
+
+    # NVIDIA GPU support
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video, compute, utility]
+
+    # Port mapping
+    ports:
+      - "12121:12121"
+
+    # Volume mounts
+    volumes:
+      # Data directory (HLS cache, config files, logs)
+      - ./data:/data
+
+      # Media directory (user's video files)
+      - ${MEDIA_PATH:-./media}:/media:ro
+
+    # Environment variables
+    environment:
+      - CACHE_DIR=/data
+      - CHANNEL_LIST=/data/channels.json
+      - NODE_ENV=production
+      - WEB_UI_PORT=12121
+
+      # FFmpeg settings (GPU-accelerated)
+      - VIDEO_CODEC=h264_nvenc
+      - VIDEO_PRESET=p4
+      - VIDEO_CRF=23
+      - VIDEO_FILTER=yadif_cuda
+      - AUDIO_CODEC=aac
+      - AUDIO_BITRATE=128k
+      - DIMENSIONS=640x480
+      - HLS_SEGMENT_LENGTH_SECONDS=1
+      - SUPPORTED_FORMATS=mov,mp4,mkv,avi,ts,m2ts,webm,divx,mpg
+      - LOG_LEVEL=verbose
+      - M3U8_CACHE_INTERVAL=5
+      - M3U8_MAX_AGE=5
+      - MANIFEST_UPCOMING_COUNT=5
+
+      # NVIDIA environment variables
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:12121/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

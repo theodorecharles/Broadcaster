@@ -1,0 +1,59 @@
+# Node modules
+node_modules
+Webapp/node_modules
+
+# Build artifacts
+Webapp/dist
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files (use config mount instead)
+config.txt
+.env
+.env.local
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data directories (use volumes instead)
+data
+media
+
+# Cache
+.cache
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md
+LICENSE
+
+# Example files
+example.json
+
+# PM2
+ecosystem.config.js
+.pm2
+
+# Claude
+.claude

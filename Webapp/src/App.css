@@ -1,0 +1,227 @@
+.tv-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.video-wrapper {
+  position: relative;
+  width: 90vw;
+  max-width: 1200px;
+  aspect-ratio: 4/3;
+  background: #111;
+  border: 20px solid #333;
+  border-radius: 20px;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.video-content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* Hide PIP button */
+video::-webkit-media-controls-picture-in-picture-button {
+  display: none !important;
+}
+
+.static-gif {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 10;
+}
+
+/* CRT scanlines effect - togglable */
+.video-content.scanlines::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.15),
+    rgba(0, 0, 0, 0.15) 1px,
+    transparent 1px,
+    transparent 2px
+  );
+  pointer-events: none;
+  z-index: 30;
+}
+
+/* CRT power off animation */
+@keyframes crt-off {
+  0% {
+    transform: scaleY(1) scaleX(1);
+    filter: brightness(1);
+  }
+  60% {
+    transform: scaleY(0.01) scaleX(1);
+    filter: brightness(3);
+  }
+  100% {
+    transform: scaleY(0) scaleX(0);
+    filter: brightness(0);
+  }
+}
+
+@keyframes crt-on {
+  0% {
+    transform: scaleY(0) scaleX(0);
+    filter: brightness(0);
+  }
+  40% {
+    transform: scaleY(0.01) scaleX(1);
+    filter: brightness(3);
+  }
+  100% {
+    transform: scaleY(1) scaleX(1);
+    filter: brightness(1);
+  }
+}
+
+.video-content.power-off {
+  animation: crt-off 0.5s ease-out forwards;
+}
+
+.video-content.power-on {
+  animation: crt-on 0.5s ease-out forwards;
+}
+
+/* Channel/Volume overlays */
+.channel-overlay,
+.volume-overlay {
+  position: absolute;
+  color: #0f0;
+  text-shadow: 0 0 10px #0f0;
+  font-weight: bold;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.channel-overlay.show,
+.channel-name.show,
+.volume-overlay.show {
+  opacity: 1;
+}
+
+.channel-overlay {
+  top: 20px;
+  right: 20px;
+  font-size: 48px;
+}
+
+.channel-name {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #0f0;
+  text-shadow: 0 0 10px #0f0;
+  font-size: 24px;
+  font-weight: bold;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.volume-overlay {
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.volume-bar {
+  width: 200px;
+  height: 20px;
+  background: #222;
+  border: 2px solid #0f0;
+  position: relative;
+}
+
+.volume-fill {
+  height: 100%;
+  background: #0f0;
+  box-shadow: 0 0 10px #0f0;
+  transition: width 0.2s;
+}
+
+/* Control panel */
+.controls {
+  display: flex;
+  gap: 15px;
+  padding: 15px;
+  background: #222;
+  border-radius: 10px;
+  border: 2px solid #444;
+}
+
+button {
+  background: linear-gradient(to bottom, #666, #444);
+  color: #bbb;
+  border: 2px solid #555;
+  border-radius: 5px;
+  padding: 15px 20px;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  text-shadow: 1px 1px 0 #222;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2),
+              0 2px 4px rgba(0, 0, 0, 0.5);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button svg {
+  filter: drop-shadow(1px 1px 0 #222);
+}
+
+button:hover {
+  background: linear-gradient(to bottom, #777, #555);
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3),
+              0 3px 6px rgba(0, 0, 0, 0.6);
+}
+
+button:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4),
+              0 1px 2px rgba(0, 0, 0, 0.3);
+  background: linear-gradient(to bottom, #555, #333);
+}
+
+.power-btn {
+  background: linear-gradient(to bottom, #844, #622);
+  border-color: #733;
+}
+
+.power-btn:hover {
+  background: linear-gradient(to bottom, #955, #733);
+}
+
+.power-btn.on {
+  background: linear-gradient(to bottom, #484, #262);
+  border-color: #373;
+}

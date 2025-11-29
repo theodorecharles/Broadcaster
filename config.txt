@@ -5,10 +5,12 @@ CHANNEL_LIST=/channels.json
 
 ## FFMpeg Setup. Use at your own risk.
 
-# Default is nvenc, but you could try libx264 or h264_qsv if you have an 
+# Default is nvenc, but you could try libx264 or h264_qsv if you have an
 # Intel CPU with Intel QuickSync.
-VIDEO_CODEC=h264_nvenc
-VIDEO_CRF=30
+# Using h264_videotoolbox for Mac hardware encoding
+VIDEO_CODEC=h264_videotoolbox
+VIDEO_CRF=28
+VIDEO_PRESET=veryfast
 VIDEO_FILTER=yadif
 AUDIO_CODEC=aac
 AUDIO_BITRATE=128k
@@ -17,21 +19,19 @@ FFMPEG_SEEK_AHEAD_SECONDS=30
 
 # Choose the length of HTTP Live Streaming .ts clips. Apple recommends 6 seconds,
 # if you have high performance storage (i.e. ramdisk) you can go lower.
-HLS_SEGMENT_LENGTH_SECONDS=10
+HLS_SEGMENT_LENGTH_SECONDS=1
 
-# Broadcaster routinely cleans up old files. This affects the size of the cache
-# it will maintain as a result. Lower can cause instability. 
-HLS_SEGMENT_FILE_EXPIRY_MINUTES=10
+# Pre-generated HLS files are kept permanently (no cleanup needed)
+# HLS_SEGMENT_FILE_EXPIRY_MINUTES=10
 
 # List the formats you want to pass into ffmpeg. It is recommended to only add
 # formats you know will work! Otherwise you may get errors on .NFO files for example
 SUPPORTED_FORMATS=mov,mp4,mkv,avi,ts,m2ts,webm,divx,mpg
 
-# Specify where to store the files ffmpeg generates. Storing in /tmp will keep
-# them in RAM which is recommended vs. writing to a hard disk which can be slow
-# or to an SSD which will just degrade the lifespan of the SSD.
-CACHE_DIR=/tmp
-FLUSH_INTERVAL_MINUTES=10
+# Specify where to store the pre-generated HLS files. Using persistent storage
+# so streams don't need to be regenerated on every restart.
+CACHE_DIR=/Users/Ted/Desktop/hls
+# FLUSH_INTERVAL_MINUTES=10
 
 # Log levels (verbose, silent)
 LOG_LEVEL=verbose

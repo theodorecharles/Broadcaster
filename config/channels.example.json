@@ -1,0 +1,28 @@
+[
+  {
+    "type": "shuffle",
+    "name": "Movies",
+    "slug": "movies",
+    "paths": [
+      "/media/movies"
+    ]
+  },
+  {
+    "type": "shuffle",
+    "name": "TV Shows",
+    "slug": "tv",
+    "paths": [
+      "/media/tv"
+    ]
+  },
+  {
+    "type": "shuffle",
+    "name": "Mixed Content",
+    "slug": "mixed",
+    "paths": [
+      "/media/movies",
+      "/media/tv",
+      "/media/other"
+    ]
+  }
+]

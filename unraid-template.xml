@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Broadcaster</Name>
+  <Repository>theodoreroddy/broadcaster:latest</Repository>
+  <Registry>https://hub.docker.com/</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/theodoreroddy/Broadcaster/issues</Support>
+  <Project>https://github.com/theodoreroddy/Broadcaster</Project>
+  <Overview>Broadcaster generates and hosts HTTP Live Streams from local content using FFMpeg with NVIDIA GPU hardware acceleration. Create your own 24/7 TV channels from your media library with a retro CRT-style web interface.</Overview>
+  <Category>MediaApp:Video</Category>
+  <WebUI>http://[IP]:[PORT:12121]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/theodoreroddy/Broadcaster/master/unraid-template.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/theodoreroddy/Broadcaster/master/icon.png</Icon>
+  <ExtraParams>--runtime=nvidia</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI Port" Target="12121" Default="12121" Mode="tcp" Description="Web interface port" Type="Port" Display="always" Required="true" Mask="false">12121</Config>
+  <Config Name="Data Directory" Target="/data" Default="/mnt/user/appdata/broadcaster" Mode="rw" Description="Storage for HLS streams, config files (channels.json, config.txt), and logs" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/broadcaster</Config>
+  <Config Name="Media Directory" Target="/media" Default="/mnt/user/media" Mode="ro" Description="Your media files (movies, TV shows, etc.)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media</Config>
+  <Config Name="NVIDIA GPU ID" Target="NVIDIA_VISIBLE_DEVICES" Default="0" Mode="" Description="GPU ID to use (0 for first GPU, or 'all' for all GPUs). Run 'nvidia-smi' to see available GPUs." Type="Variable" Display="always" Required="true" Mask="false">0</Config>
+  <Config Name="NVIDIA Driver Capabilities" Target="NVIDIA_DRIVER_CAPABILITIES" Default="all" Mode="" Description="NVIDIA driver capabilities (leave as 'all')" Type="Variable" Display="always" Required="true" Mask="false">all</Config>
+</Container>

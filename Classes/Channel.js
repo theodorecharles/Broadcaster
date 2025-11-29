@@ -1,69 +1,73 @@
-const SegmenterPool = require('../Utilities/SegmenterPool.js')
 const Format = require('../Utilities/FormatValidator.js')
-const { Segmenter } = require('../Classes/Segmenter.js')
-const Bash = require('child_process').execSync
-const { Timeline } = require('./Timeline.js')
+const { PlaylistManager } = require('./PlaylistManager.js')
 const Log = require('../Utilities/Log.js')
 const fs = require('fs')
-const { CACHE_DIR, M3U8_CACHE_INTERVAL } = process.env
+const path = require('path')
+const { CACHE_DIR } = process.env
 const tag = 'Channel'
+
+// Recursively find all files in a directory
+function findFiles(dir, fileList = []) {
+  const files = fs.readdirSync(dir)
+
+  files.forEach(file => {
+    const filePath = path.join(dir, file)
+    if (fs.statSync(filePath).isDirectory()) {
+      findFiles(filePath, fileList)
+    } else {
+      fileList.push(filePath)
+    }
+  })
+
+  return fileList
+}
 
 function Channel(definition) {
 
   Log(tag, `Building the queue...`, definition)
 
-  this.timeline = new Timeline(this)
   this.type = definition.type
   this.name = definition.name
   this.slug = definition.slug
   this.queue = []
-  this.currentPlaylistIndex = -1
-  this.m3u8path = `${CACHE_DIR}/broadcaster/channels/${definition.slug}/_.m3u8`
-  this.m3u8 = ''
+  this.playlistManager = null
+  this.startTime = null
+  this.started = false
 
-  try {
+  definition.paths.forEach(dirPath => {
 
-    this.updateCache = async () => {
-      fs.readFile(this.m3u8path, 'utf8', (err, data) => {
-        if (err) {
-          Log(tag, `No m3u8 yet...`, definition)
-          return
-        }
-        this.m3u8 = data
-      })
-      return
-    }
-    setInterval(this.updateCache,M3U8_CACHE_INTERVAL*1000)
-
-  } catch(err) {
-    Log(tag, `Error when setting up m3u8 caching: ` + err)
-  }
-
-  definition.paths.forEach(path => {
-    
     var x = 0
-    Bash(`find "${path}" -type f`).toString().split('\n').forEach(file => {
-      const array = file.split('.')
-      const last = array.pop()
+    const files = findFiles(dirPath)
+
+    files.forEach(file => {
       if (Format.isSupported(file)) {
         this.queue.push(file)
         x++
       }
     })
-    Log(tag, `Found ${x} supported files in ${path}`, this)
+    Log(tag, `Found ${x} supported files in ${dirPath}`, this)
 
     if (definition.type == 'shuffle') this.queue.sort(() => Math.random() - 0.5)
 
   })
-  
-  this.segmenter = (() => {
-    SegmenterPool().addSegmenter(new Segmenter(this))
-    .then(data => {
-      this.timeline.start
-    }).catch(err => {
-      Log(tag, `Error adding segmenter to pool: ${err}`, this)
-    })
-  })()
+
+  // Initialize playlist manager
+  this.playlistManager = new PlaylistManager(this)
+
+  // Start method
+  this.start = () => {
+    this.started = true
+    this.startTime = Date.now()
+    this.playlistManager.start()
+    Log(tag, 'Channel started', this)
+  }
+
+  // Get current playlist
+  this.getPlaylist = () => {
+    if (!this.started) return null
+    const offset = (Date.now() - this.startTime) / 1000
+    return this.playlistManager.createRollingPlaylist(offset)
+  }
 
   Log(tag, `Finished initializing ${definition.type} channel "${definition.name}" with ${this.queue.length} supported videos.`, this)
 

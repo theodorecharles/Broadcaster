@@ -2,7 +2,7 @@ module.exports = {
   apps: [{
     name: 'broadcaster',
     script: 'Broadcaster.js',
-    cwd: '/home/ted/Broadcaster',
+    cwd: '/Users/Ted/Development/Broadcaster',
     instances: 1,
     autorestart: true,
     watch: false,

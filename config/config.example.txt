@@ -1,0 +1,72 @@
+# Broadcaster Configuration for Docker
+# Copy this file to config.txt and customize for your setup
+
+# Channels List
+CHANNEL_LIST=/config/channels.json
+
+## FFMpeg Setup
+
+# Video Codec
+# - h264_nvenc: NVIDIA GPU encoding (recommended for systems with NVIDIA GPU)
+# - libx264: Software encoding (CPU-based, works on all systems)
+# - h264_videotoolbox: Mac hardware encoding (for macOS only)
+# - h264_qsv: Intel QuickSync (for Intel CPUs with QuickSync)
+VIDEO_CODEC=h264_nvenc
+
+# Video Quality (CRF)
+# Lower = better quality, larger file size
+# 18-28 is a good range. 23 is default.
+VIDEO_CRF=23
+
+# Video Preset
+# For NVENC: p1 (fastest) to p7 (slowest/best quality). p4 is balanced.
+# For libx264: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
+VIDEO_PRESET=p4
+
+# Video Filter
+# yadif = deinterlacing filter (use yadif_cuda with NVENC)
+# yadif_cuda = GPU-accelerated deinterlacing (automatically used with NVENC)
+VIDEO_FILTER=yadif
+
+# Audio Codec and Settings
+AUDIO_CODEC=aac
+AUDIO_BITRATE=128k
+
+# Video Dimensions
+# Common resolutions:
+# - 640x480 (4:3 SD)
+# - 1280x720 (HD)
+# - 1920x1080 (Full HD)
+DIMENSIONS=640x480
+
+# FFmpeg seek ahead (seconds)
+FFMPEG_SEEK_AHEAD_SECONDS=30
+
+# HLS Segment Length
+# Apple recommends 6 seconds, but 1-2 seconds works well for local streaming
+HLS_SEGMENT_LENGTH_SECONDS=1
+
+# Supported Video Formats
+# Only files with these extensions will be processed
+SUPPORTED_FORMATS=mov,mp4,mkv,avi,ts,m2ts,webm,divx,mpg
+
+# Cache Directory
+# This is where HLS segments are stored (persistent)
+# For Docker, this should be /data/hls (mounted from ./data)
+CACHE_DIR=/data/hls
+
+# Log Level
+# Options: verbose, silent
+LOG_LEVEL=verbose
+
+## Frontend Options
+
+# Web UI Port
+WEB_UI_PORT=12121
+
+# M3U8 playlist caching (seconds)
+M3U8_CACHE_INTERVAL=5
+M3U8_MAX_AGE=5
+
+# How many upcoming programs to show in manifest
+MANIFEST_UPCOMING_COUNT=5
