@@ -43,6 +43,8 @@ COPY config.docker.txt ./config.txt
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /app/Webapp/dist ./Webapp/dist
 COPY Webapp/TelevisionUI.js ./Webapp/
+COPY Webapp/static ./Webapp/static
+COPY Webapp/static.gif ./Webapp/
 
 # Create broadcaster user with UID 99 (nobody) and GID 100 (users)
 RUN groupadd -g 100 users || true && \
