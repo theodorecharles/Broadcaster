@@ -22,9 +22,29 @@ process.on('SIGINT', _ => {
 
 try {
   require('dotenv').config({ path: `./config.txt` })
-  var channels = fs.readFileSync(`.${CHANNEL_LIST}`)
-} catch(e) { 
-  Log(tag, `Couldn't read the file you provided... ${e}`) 
+
+  // Check if channels.json exists, create default if it doesn't
+  const channelsPath = `.${CHANNEL_LIST}`
+  if (!fs.existsSync(channelsPath)) {
+    Log(tag, `No channels.json found at ${channelsPath}, creating default...`)
+    const defaultChannels = [
+      {
+        "type": "shuffle",
+        "name": "Example Channel",
+        "slug": "example",
+        "paths": [
+          "/media"
+        ]
+      }
+    ]
+    fs.mkdirSync(path.dirname(channelsPath), { recursive: true })
+    fs.writeFileSync(channelsPath, JSON.stringify(defaultChannels, null, 2))
+    Log(tag, `Created default channels.json. Edit ${CHANNEL_LIST} to configure your channels.`)
+  }
+
+  var channels = fs.readFileSync(channelsPath)
+} catch(e) {
+  Log(tag, `Couldn't read the file you provided... ${e}`)
 }
 
 try {
