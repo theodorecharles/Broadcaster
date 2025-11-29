@@ -98,23 +98,34 @@ async function reloadChannels() {
   Log(tag, 'Channels reloaded - pre-generation running in background')
 }
 
-// Watch channels.json for changes
+// Watch channels.json for changes using polling (more reliable across systems)
 function watchChannelsFile() {
-  let debounceTimer = null
+  let lastMtime = null
 
-  fs.watch(channelsPath, (eventType) => {
-    if (eventType === 'change') {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer)
-      }
-      debounceTimer = setTimeout(() => {
+  // Get initial mtime
+  try {
+    lastMtime = fs.statSync(channelsPath).mtimeMs
+  } catch (e) {
+    Log(tag, `Could not stat ${channelsPath}: ${e.message}`)
+  }
+
+  // Poll every 5 seconds
+  setInterval(() => {
+    try {
+      const currentMtime = fs.statSync(channelsPath).mtimeMs
+      if (lastMtime && currentMtime !== lastMtime) {
         Log(tag, 'channels.json changed, reloading...')
+        lastMtime = currentMtime
         reloadChannels()
-      }, 1000)
+      } else if (!lastMtime) {
+        lastMtime = currentMtime
+      }
+    } catch (e) {
+      // File might be temporarily unavailable during write
     }
-  })
+  }, 5000)
 
-  Log(tag, `Watching ${channelsPath} for changes`)
+  Log(tag, `Watching ${channelsPath} for changes (polling every 5s)`)
 }
 
 // Startup sequence
