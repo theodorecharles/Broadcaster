@@ -1,0 +1,33 @@
+# Broadcaster Docker Configuration
+
+# Channel list location (inside container)
+CHANNEL_LIST=/data/channels.json
+
+## FFMpeg Setup
+# Use h264_nvenc for NVIDIA GPU encoding, libx264 for CPU fallback
+VIDEO_CODEC=h264_nvenc
+VIDEO_CRF=23
+VIDEO_PRESET=fast
+VIDEO_FILTER=yadif
+AUDIO_CODEC=aac
+AUDIO_BITRATE=128k
+DIMENSIONS=640x480
+FFMPEG_SEEK_AHEAD_SECONDS=30
+
+# HLS segment length (Apple recommends 6 seconds)
+HLS_SEGMENT_LENGTH_SECONDS=6
+
+# Supported video formats
+SUPPORTED_FORMATS=mov,mp4,mkv,avi,ts,m2ts,webm,divx,mpg
+
+# HLS cache directory (inside container)
+CACHE_DIR=/data
+
+# Log level (verbose, silent)
+LOG_LEVEL=verbose
+
+## Frontend options
+WEB_UI_PORT=12121
+M3U8_CACHE_INTERVAL=5
+M3U8_MAX_AGE=5
+MANIFEST_UPCOMING_COUNT=5
