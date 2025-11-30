@@ -220,6 +220,66 @@ video::-webkit-media-controls-picture-in-picture-button {
     width: 6px;
     height: 6px;
   }
+
+  /* Scale down channel overlays */
+  .channel-overlay {
+    font-size: 24px;
+    top: 10px;
+    right: 10px;
+  }
+
+  .channel-name {
+    font-size: 12px;
+    bottom: 10px;
+  }
+
+  .volume-overlay {
+    bottom: 30px;
+    font-size: 12px;
+  }
+
+  .volume-bar {
+    width: 100px;
+    height: 10px;
+  }
+
+  /* Scale down menu */
+  .tv-menu {
+    top: 10px;
+    left: 10px;
+    padding: 10px 15px;
+    min-width: 160px;
+    border-width: 2px;
+  }
+
+  .tv-menu h2 {
+    font-size: 14px;
+    margin: 0 0 10px 0;
+    padding-bottom: 5px;
+  }
+
+  .menu-option {
+    padding: 8px 0;
+  }
+
+  .menu-label {
+    font-size: 11px;
+  }
+
+  .menu-toggle {
+    gap: 5px;
+  }
+
+  .menu-toggle button {
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+
+  .menu-close {
+    margin-top: 10px;
+    padding: 6px !important;
+    font-size: 11px;
+  }
 }
 
 .controls button:hover {
