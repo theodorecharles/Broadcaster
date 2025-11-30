@@ -53,15 +53,36 @@ class PreGenerator {
     }
 
     /**
+     * Delete a partial/incomplete HLS directory
+     */
+    deletePartialGeneration(outputDir, fileName) {
+        try {
+            const files = fs.readdirSync(outputDir)
+            for (const file of files) {
+                fs.unlinkSync(path.join(outputDir, file))
+            }
+            fs.rmdirSync(outputDir)
+            Log(tag, `Deleted incomplete generation for ${fileName}`)
+        } catch (e) {
+            Log(tag, `Failed to delete incomplete generation: ${e.message}`)
+        }
+    }
+
+    /**
      * Check if HLS files already exist for this video and are complete
      */
     isAlreadyGenerated(filePath, channelSlug) {
         const videoHash = this.getVideoHash(filePath)
         const outputDir = path.join(CACHE_DIR, 'channels', channelSlug, 'videos', videoHash)
         const playlistPath = path.join(outputDir, 'index.m3u8')
+        const fileName = path.basename(filePath)
 
         // Check if playlist exists
         if (!fs.existsSync(playlistPath)) {
+            // If directory exists but no playlist, it's incomplete - delete it
+            if (fs.existsSync(outputDir)) {
+                this.deletePartialGeneration(outputDir, fileName)
+            }
             return false
         }
 
@@ -72,8 +93,27 @@ class PreGenerator {
 
             // If we have a playlist but no segments, it's incomplete
             if (segmentFiles.length === 0) {
-                Log(tag, `Incomplete generation detected for ${path.basename(filePath)} - no segments found`)
+                Log(tag, `Incomplete generation detected for ${fileName} - no segments found`)
+                this.deletePartialGeneration(outputDir, fileName)
                 return false
+            }
+
+            // Check if playlist is complete (has #EXT-X-ENDLIST)
+            const playlistContent = fs.readFileSync(playlistPath, 'utf8')
+            if (!playlistContent.includes('#EXT-X-ENDLIST')) {
+                Log(tag, `Incomplete generation detected for ${fileName} - playlist not finalized`)
+                this.deletePartialGeneration(outputDir, fileName)
+                return false
+            }
+
+            // Verify all segments referenced in playlist exist
+            const segmentRefs = playlistContent.match(/segment_\d+\.ts/g) || []
+            for (const segmentRef of segmentRefs) {
+                if (!fs.existsSync(path.join(outputDir, segmentRef))) {
+                    Log(tag, `Incomplete generation detected for ${fileName} - missing segment ${segmentRef}`)
+                    this.deletePartialGeneration(outputDir, fileName)
+                    return false
+                }
             }
 
             return true
