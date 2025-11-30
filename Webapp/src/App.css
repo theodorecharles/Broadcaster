@@ -622,6 +622,7 @@ video::-webkit-media-controls-picture-in-picture-button {
   display: flex;
   flex-direction: column;
   min-width: max-content;
+  position: relative;
 }
 
 .guide-channel-row {

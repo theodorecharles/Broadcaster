@@ -360,7 +360,7 @@ function App() {
             setGuideData(data)
             setShowGuide(true)
 
-            // Scroll to current time after render
+            // Scroll to current time and current channel after render
             setTimeout(() => {
               if (guideRef.current && data.dayStart) {
                 const now = Date.now()
@@ -369,6 +369,14 @@ function App() {
                 const pxPerMs = 10 / (60 * 1000) // 10px per minute (30m = 300px)
                 const scrollX = msFromDayStart * pxPerMs - 200 // Offset to show some past content
                 guideRef.current.scrollLeft = Math.max(0, scrollX)
+
+                // Scroll current channel into view
+                if (channelsRef.current) {
+                  const channelEl = channelsRef.current.querySelector('.guide-channel-name.current')
+                  if (channelEl) {
+                    channelEl.scrollIntoView({ block: 'center' })
+                  }
+                }
               }
             }, 100)
           })
@@ -602,14 +610,14 @@ function App() {
                   })}
                 </div>
                 <div className="guide-schedule-container" ref={guideRef} onScroll={handleScheduleScroll}>
-                  {/* Current time indicator line */}
-                  {guideData.dayStart && (
-                    <div
-                      className="guide-now-line"
-                      style={{ left: (Date.now() - guideData.dayStart) / (60 * 1000) * 10 }}
-                    />
-                  )}
                   <div className="guide-schedule-scroll">
+                    {/* Current time indicator line */}
+                    {guideData.dayStart && (
+                      <div
+                        className="guide-now-line"
+                        style={{ left: (Date.now() - guideData.dayStart) / (60 * 1000) * 10 }}
+                      />
+                    )}
                     {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => (
                       <div key={slug} className="guide-channel-row">
                         {channelData.schedule.map((show, idx) => {
