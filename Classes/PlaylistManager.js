@@ -69,6 +69,7 @@ class PlaylistManager {
             const playlistPath = this.getVideoPlaylistPath(filePath)
 
             if (!fs.existsSync(playlistPath)) {
+                Log(tag, `Missing HLS for: ${path.basename(filePath)}`, this.channel)
                 return
             }
 
@@ -105,6 +106,7 @@ class PlaylistManager {
 
     /**
      * Create a rolling playlist that shows only segments within a time window
+     * Handles looping by wrapping around to the beginning when near the end
      */
     createRollingPlaylist(offsetSeconds = 0) {
         const allSegments = this.generateMasterPlaylist()
@@ -128,13 +130,28 @@ class PlaylistManager {
             }
         }
 
-        // Include 30 seconds behind and 60 seconds ahead
-        const windowStart = Math.max(0, currentIndex - 30)
-        const windowEnd = Math.min(allSegments.length, currentIndex + 60)
-        const segmentsInWindow = allSegments.slice(windowStart, windowEnd)
+        // Include 30 seconds behind and 60 seconds ahead, wrapping around for loop
+        const windowBehind = 30
+        const windowAhead = 60
+        const totalSegments = allSegments.length
 
-        // Calculate sequence number based on window start
-        const mediaSequence = windowStart
+        let segmentsInWindow = []
+
+        // Gather segments, wrapping around if needed
+        for (let i = -windowBehind; i < windowAhead; i++) {
+            const idx = currentIndex + i
+            if (idx >= 0 && idx < totalSegments) {
+                segmentsInWindow.push(allSegments[idx])
+            } else if (idx >= totalSegments) {
+                // Wrap around to beginning for continuous loop
+                const wrappedIdx = idx % totalSegments
+                segmentsInWindow.push(allSegments[wrappedIdx])
+            }
+        }
+
+        // Calculate sequence number - use loop count * totalSegments + position for monotonic increase
+        const loopCount = Math.floor(offsetSeconds / totalDuration)
+        const mediaSequence = loopCount * totalSegments + Math.max(0, currentIndex - windowBehind)
 
         // Build playlist for live streaming (no ENDLIST tag)
         let playlist = '#EXTM3U\n'
