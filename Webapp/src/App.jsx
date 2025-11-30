@@ -6,6 +6,7 @@ function App() {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
   const overlayTimeoutRef = useRef(null)
+  const guideRef = useRef(null)
 
   const [channels, setChannels] = useState([])
   const [currentChannelIndex, setCurrentChannelIndex] = useState(-1)
@@ -15,7 +16,8 @@ function App() {
   const [showChannelOverlay, setShowChannelOverlay] = useState(false)
   const [showVolumeOverlay, setShowVolumeOverlay] = useState(false)
   const [powerAnimation, setPowerAnimation] = useState(null)
-  const [showMenu, setShowMenu] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
+  const [guideData, setGuideData] = useState({})
   const [aspectRatio, setAspectRatio] = useState(() => {
     return localStorage.getItem('tv-aspectRatio') || '16:9'
   })
@@ -293,10 +295,65 @@ function App() {
     }
   }
 
-  // Menu toggle
-  const toggleMenu = () => {
+  // TV Guide toggle
+  const toggleGuide = () => {
     if (isPoweredOn) {
-      setShowMenu(!showMenu)
+      if (!showGuide) {
+        // Fetch guide data when opening
+        fetch('/api/guide')
+          .then(res => res.json())
+          .then(data => {
+            setGuideData(data)
+            setShowGuide(true)
+
+            // Scroll to current time after render
+            setTimeout(() => {
+              if (guideRef.current && data.dayStart) {
+                const now = Date.now()
+                const dayStart = data.dayStart
+                const msFromDayStart = now - dayStart
+                const pxPerMs = 24 / (60 * 1000) // 24px per minute = 24/60000 px per ms
+                const scrollX = msFromDayStart * pxPerMs - 200 // Offset to show some past content
+                guideRef.current.scrollLeft = Math.max(0, scrollX)
+              }
+            }, 100)
+          })
+          .catch(err => console.error('Failed to load guide:', err))
+      } else {
+        setShowGuide(false)
+      }
+    }
+  }
+
+  // Navigate to channel from guide
+  const selectChannelFromGuide = (slug) => {
+    const index = channels.findIndex(c => c.slug === slug)
+    if (index !== -1) {
+      setShowGuide(false)
+      changeChannel(index)
+    }
+  }
+
+  // Format time for guide display
+  const formatTime = (timestamp) => {
+    const date = new Date(timestamp)
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  }
+
+  // Format duration for guide display
+  const formatDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60)
+    if (mins < 60) return `${mins}m`
+    const hours = Math.floor(mins / 60)
+    const remainMins = mins % 60
+    return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
+  }
+
+  // Sync vertical scroll between channel list and schedule
+  const channelsRef = useRef(null)
+  const handleScheduleScroll = (e) => {
+    if (channelsRef.current) {
+      channelsRef.current.scrollTop = e.target.scrollTop
     }
   }
 
@@ -369,19 +426,19 @@ function App() {
         case 'P':
           togglePower()
           break
-        case 'm':
-        case 'M':
-          toggleMenu()
+        case 'g':
+        case 'G':
+          toggleGuide()
           break
         case 'Escape':
-          setShowMenu(false)
+          setShowGuide(false)
           break
       }
     }
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isPoweredOn, channels, currentChannelIndex, currentVolume, showMenu])
+  }, [isPoweredOn, channels, currentChannelIndex, currentVolume, showGuide])
 
   const currentChannel = channels[currentChannelIndex]
 
@@ -424,46 +481,93 @@ function App() {
             </div>
           </div>
 
-          {showMenu && (
-            <div className="tv-menu">
-              <h2>SETTINGS</h2>
-              <div className="menu-option">
-                <span className="menu-label">ASPECT</span>
-                <div className="menu-toggle">
-                  <button
-                    className={aspectRatio === '16:9' ? 'active' : ''}
-                    onClick={() => setAspectRatio('16:9')}
-                  >
-                    16:9
-                  </button>
-                  <button
-                    className={aspectRatio === '4:3' ? 'active' : ''}
-                    onClick={() => setAspectRatio('4:3')}
-                  >
-                    4:3
-                  </button>
+          {showGuide && (
+            <div className="tv-guide">
+              <div className="guide-header">
+                <h2>TV GUIDE</h2>
+                <div className="guide-settings">
+                  <div className="guide-setting">
+                    <span>ASPECT</span>
+                    <div className="guide-toggle">
+                      <button
+                        className={aspectRatio === '16:9' ? 'active' : ''}
+                        onClick={() => setAspectRatio('16:9')}
+                      >
+                        16:9
+                      </button>
+                      <button
+                        className={aspectRatio === '4:3' ? 'active' : ''}
+                        onClick={() => setAspectRatio('4:3')}
+                      >
+                        4:3
+                      </button>
+                    </div>
+                  </div>
+                  <div className="guide-setting">
+                    <span>CRT</span>
+                    <div className="guide-toggle">
+                      <button
+                        className={!scanlines ? 'active' : ''}
+                        onClick={() => setScanlines(false)}
+                      >
+                        OFF
+                      </button>
+                      <button
+                        className={scanlines ? 'active' : ''}
+                        onClick={() => setScanlines(true)}
+                      >
+                        ON
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div className="guide-time-now">
+                  {new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                </div>
+                <button className="guide-close" onClick={() => setShowGuide(false)}>X</button>
+              </div>
+              <div className="guide-body">
+                <div className="guide-channels" ref={channelsRef}>
+                  {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => (
+                    <div
+                      key={slug}
+                      className={`guide-channel-name ${channels[currentChannelIndex]?.slug === slug ? 'current' : ''}`}
+                      onClick={() => selectChannelFromGuide(slug)}
+                    >
+                      {channelData.name}
+                    </div>
+                  ))}
+                </div>
+                <div className="guide-schedule-container" ref={guideRef} onScroll={handleScheduleScroll}>
+                  {/* Current time indicator line */}
+                  {guideData.dayStart && (
+                    <div
+                      className="guide-now-line"
+                      style={{ left: (Date.now() - guideData.dayStart) / (60 * 1000) * 24 }}
+                    />
+                  )}
+                  <div className="guide-schedule-scroll">
+                    {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => (
+                      <div key={slug} className="guide-channel-row">
+                        {channelData.schedule.map((show, idx) => (
+                          <div
+                            key={idx}
+                            className={`guide-show ${show.isCurrent ? 'current' : ''}`}
+                            style={{
+                              width: Math.max(200, show.duration / 60 * 24),
+                              marginLeft: idx === 0 ? (show.startTime - guideData.dayStart) / (60 * 1000) * 24 : 0
+                            }}
+                          >
+                            <div className="guide-show-time">{formatTime(show.startTime)}</div>
+                            <div className="guide-show-title">{show.title}</div>
+                            <div className="guide-show-duration">{formatDuration(show.duration)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-              <div className="menu-option">
-                <span className="menu-label">SCANLINES</span>
-                <div className="menu-toggle">
-                  <button
-                    className={!scanlines ? 'active' : ''}
-                    onClick={() => setScanlines(false)}
-                  >
-                    OFF
-                  </button>
-                  <button
-                    className={scanlines ? 'active' : ''}
-                    onClick={() => setScanlines(true)}
-                  >
-                    ON
-                  </button>
-                </div>
-              </div>
-              <button className="menu-close" onClick={() => setShowMenu(false)}>
-                CLOSE
-              </button>
             </div>
           )}
 
@@ -509,9 +613,10 @@ function App() {
             <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/>
           </svg>
         </button>
-        <button onClick={toggleMenu} title="Menu">
+        <button onClick={toggleGuide} title="TV Guide">
           <svg viewBox="0 0 24 24" width="24" height="24">
-            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" fill="currentColor"/>
+            <path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z" fill="currentColor"/>
+            <rect x="2" y="4" width="3" height="16" rx="1" fill="currentColor"/>
           </svg>
         </button>
       </div>

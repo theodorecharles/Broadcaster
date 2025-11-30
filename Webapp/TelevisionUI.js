@@ -91,6 +91,52 @@ class TelevisionUI {
         })
     })
 
+    // TV Guide API - returns full day schedule for all channels (3am to 3am)
+    this.app.get(`/api/guide`, function(req,res){
+        const guide = {
+            dayStart: null,
+            channels: {}
+        }
+
+        ChannelPool().queue.forEach(channel => {
+            if (channel.started && channel.playlistManager) {
+                if (!guide.dayStart) {
+                    guide.dayStart = channel.playlistManager.getDayStart()
+                }
+                guide.channels[channel.slug] = {
+                    name: channel.name,
+                    slug: channel.slug,
+                    schedule: channel.playlistManager.getSchedule()
+                }
+            }
+        })
+
+        res.json(guide)
+    })
+
+    // Single channel schedule
+    this.app.get(`/:slug/schedule`, function(req,res){
+        const slug = req.params.slug
+        const channel = ChannelPool().queue.find(c => c.slug === slug)
+
+        if (!channel) {
+            res.json({ error: 'Channel not found' })
+            return
+        }
+
+        if (!channel.started || !channel.playlistManager) {
+            res.json({ error: 'Channel not started' })
+            return
+        }
+
+        res.json({
+            name: channel.name,
+            slug: channel.slug,
+            dayStart: channel.playlistManager.getDayStart(),
+            schedule: channel.playlistManager.getSchedule()
+        })
+    })
+
     // Dynamic channel routes - matches any *.m3u8 and looks up channel by slug
     this.app.get(`/:slug.m3u8`, function(req,res){
         const slug = req.params.slug

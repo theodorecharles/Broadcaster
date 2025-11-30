@@ -29,6 +29,7 @@ function Channel(definition) {
   this.type = definition.type
   this.name = definition.name
   this.slug = definition.slug
+  this.paths = definition.paths
   this.queue = []
   this.playlistManager = null
   this.startTime = null
