@@ -62,6 +62,27 @@ class TelevisionUI {
         res.send(JSON.stringify(manifest))
     })
 
+    // Debug endpoint to check playlist stats
+    this.app.get(`/:slug/debug`, function(req,res){
+        const slug = req.params.slug
+        const channel = ChannelPool().queue.find(c => c.slug === slug)
+        if (!channel) {
+            res.json({ error: 'Channel not found' })
+            return
+        }
+        const allSegments = channel.playlistManager.generateMasterPlaylist()
+        const videoHashes = [...new Set(allSegments.map(s => s.path.split('/')[3]))]
+        const offset = channel.playlistManager.getCurrentOffset()
+        res.json({
+            channelName: channel.name,
+            queueLength: channel.queue.length,
+            totalSegments: allSegments.length,
+            uniqueVideos: videoHashes.length,
+            currentOffset: offset,
+            totalDuration: allSegments.length > 0 ? allSegments[allSegments.length - 1].timestamp : 0
+        })
+    })
+
     // Dynamic channel routes - matches any *.m3u8 and looks up channel by slug
     this.app.get(`/:slug.m3u8`, function(req,res){
         const slug = req.params.slug

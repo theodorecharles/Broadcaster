@@ -158,8 +158,14 @@ class PlaylistManager {
         playlist += '#EXT-X-TARGETDURATION:2\n'
         playlist += `#EXT-X-MEDIA-SEQUENCE:${mediaSequence}\n`
 
-        // Add segments in window
+        // Add segments in window, with discontinuity tags at video transitions
+        let lastVideoIndex = null
         segmentsInWindow.forEach(segment => {
+            // Add discontinuity tag when transitioning to a different video
+            if (lastVideoIndex !== null && segment.videoIndex !== lastVideoIndex) {
+                playlist += '#EXT-X-DISCONTINUITY\n'
+            }
+            lastVideoIndex = segment.videoIndex
             playlist += `#EXTINF:${segment.duration.toFixed(6)},\n`
             playlist += `${segment.path}\n`
         })
