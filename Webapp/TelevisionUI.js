@@ -216,6 +216,33 @@ class TelevisionUI {
         })
     })
 
+    // Manifest endpoint - shows hash to filename mapping for debugging
+    this.app.get(`/:slug/manifest`, function(req,res){
+        const slug = req.params.slug
+        const manifestPath = path.join(CACHE_DIR, 'channels', slug, 'manifest.json')
+
+        if (!fs.existsSync(manifestPath)) {
+            res.json({ error: 'Manifest not found' })
+            return
+        }
+
+        try {
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+            // Return manifest with hash as key and readable info
+            const result = {}
+            for (const [hash, info] of Object.entries(manifest)) {
+                result[hash] = {
+                    filename: info.filename,
+                    originalPath: info.originalPath,
+                    addedAt: info.addedAt ? new Date(info.addedAt).toISOString() : null
+                }
+            }
+            res.json(result)
+        } catch (e) {
+            res.json({ error: 'Failed to read manifest: ' + e.message })
+        }
+    })
+
     // Dynamic channel routes - matches any *.m3u8 and looks up channel by slug
     this.app.get(`/:slug.m3u8`, function(req,res){
         const slug = req.params.slug

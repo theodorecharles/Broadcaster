@@ -1,5 +1,6 @@
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 const Log = require('../Utilities/Log.js')
 const tag = 'PlaylistManager'
 const { CACHE_DIR } = process.env
@@ -12,15 +13,11 @@ class PlaylistManager {
     }
 
     /**
-     * Generate a safe directory name from a video file path
-     * Uses the filename (without extension) and sanitizes for filesystem safety
+     * Generate a unique hash for a video file path
+     * The manifest.json maps these hashes back to original filenames
      */
     getVideoHash(filePath) {
-        // Get filename without extension
-        const filename = path.basename(filePath, path.extname(filePath))
-        // Replace filesystem-unsafe characters with underscores
-        // Keep alphanumeric, spaces, dashes, parentheses, and dots
-        return filename.replace(/[^a-zA-Z0-9 \-().]/g, '_').trim()
+        return crypto.createHash('md5').update(filePath).digest('hex')
     }
 
     /**
