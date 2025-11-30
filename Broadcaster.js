@@ -156,21 +156,18 @@ async function startup() {
       PreGenerator.queueChannel(channel)
     })
 
-    // Wait for all streams to be generated before starting broadcast
+    // Start broadcast immediately - channels will play whatever content is ready
+    // Guide and playlist automatically exclude videos that aren't transcoded yet
+    ChannelPool().startBroadcast()
+    Log(tag, 'Broadcast started - transcoding continues in background')
+
+    // Generate remaining streams in background
     await PreGenerator.startGeneration()
 
     Log(tag, 'All HLS streams ready!')
 
   } catch (e) {
     Log(tag, 'Error during pre-generation: ' + e)
-  }
-
-  // Start broadcast AFTER all content is ready
-  try {
-    ChannelPool().startBroadcast()
-    Log(tag, 'Broadcast started - all channels now live!')
-  } catch (e) {
-    Log(tag, 'Unable to start the broadcast: ' + e)
   }
 }
 
