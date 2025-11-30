@@ -672,6 +672,8 @@ video::-webkit-media-controls-picture-in-picture-button {
   white-space: nowrap;
   overflow: hidden;
   position: relative;
+  width: 100%;
+  min-width: 0;
 }
 
 .guide-show-title span {
