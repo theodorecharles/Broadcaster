@@ -250,8 +250,14 @@ function App() {
 
   // Fullscreen
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      videoRef.current?.requestFullscreen()
+    const video = videoRef.current
+    if (!video) return
+
+    // iOS Safari uses webkitEnterFullscreen on video element
+    if (video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen()
+    } else if (!document.fullscreenElement) {
+      video.requestFullscreen()
     } else {
       document.exitFullscreen()
     }
