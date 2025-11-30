@@ -153,11 +153,13 @@ class PlaylistManager {
         const loopCount = Math.floor(offsetSeconds / totalDuration)
         const mediaSequence = loopCount * totalSegments + Math.max(0, currentIndex - windowBehind)
 
+        // Find max segment duration for TARGETDURATION (HLS spec requires it >= max segment)
+        const maxDuration = Math.ceil(Math.max(...segmentsInWindow.map(s => s.duration), 2))
+
         // Build playlist for live streaming (no ENDLIST tag)
-        // TARGETDURATION affects how often HLS.js polls for new playlist (polls at ~targetDuration/2)
         let playlist = '#EXTM3U\n'
         playlist += '#EXT-X-VERSION:3\n'
-        playlist += '#EXT-X-TARGETDURATION:10\n'
+        playlist += `#EXT-X-TARGETDURATION:${maxDuration}\n`
         playlist += `#EXT-X-MEDIA-SEQUENCE:${mediaSequence}\n`
 
         // Add segments in window, with discontinuity tags at video transitions
