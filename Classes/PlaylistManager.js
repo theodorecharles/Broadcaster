@@ -69,7 +69,6 @@ class PlaylistManager {
             const playlistPath = this.getVideoPlaylistPath(filePath)
 
             if (!fs.existsSync(playlistPath)) {
-                Log(tag, `Missing HLS for: ${path.basename(filePath)}`, this.channel)
                 return
             }
 
