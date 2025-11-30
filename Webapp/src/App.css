@@ -711,7 +711,7 @@ video::-webkit-media-controls-picture-in-picture-button {
   }
 
   .guide-header h2 {
-    font-size: 12px;
+    display: none;
   }
 
   .guide-time-now {
@@ -719,9 +719,7 @@ video::-webkit-media-controls-picture-in-picture-button {
   }
 
   .guide-close {
-    width: 24px;
-    height: 24px;
-    font-size: 12px;
+    display: none;
   }
 
   .guide-channels {
