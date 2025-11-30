@@ -75,8 +75,10 @@ async function reloadChannels() {
 
   // Reset PreGenerator queue
   PreGenerator.generationQueue = []
+  PreGenerator.channelQueues = []
   PreGenerator.currentIndex = 0
   PreGenerator.totalVideos = 0
+  PreGenerator.isGenerating = false
 
   // Load and initialize new channels
   const channelDefinitions = loadChannels()
