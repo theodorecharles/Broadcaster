@@ -245,42 +245,42 @@ video::-webkit-media-controls-picture-in-picture-button {
 
   /* Scale down menu - 20% of desktop */
   .tv-menu {
-    top: 2px;
-    left: 2px;
-    padding: 4px 6px;
-    min-width: 56px;
-    border-width: 1px;
+    top: 2px !important;
+    left: 2px !important;
+    padding: 4px 6px !important;
+    min-width: 56px !important;
+    border-width: 1px !important;
   }
 
   .tv-menu h2 {
-    font-size: 5px;
-    margin: 0 0 2px 0;
-    padding-bottom: 1px;
-    border-width: 1px;
+    font-size: 5px !important;
+    margin: 0 0 2px 0 !important;
+    padding-bottom: 1px !important;
+    border-width: 1px !important;
   }
 
   .menu-option {
-    padding: 1px 0;
+    padding: 1px 0 !important;
   }
 
   .menu-label {
-    font-size: 4px;
+    font-size: 4px !important;
   }
 
   .menu-toggle {
-    gap: 1px;
+    gap: 1px !important;
   }
 
   .menu-toggle button {
-    padding: 1px 2px;
-    font-size: 3px;
-    border-width: 1px;
+    padding: 1px 2px !important;
+    font-size: 3px !important;
+    border-width: 1px !important;
   }
 
   .menu-close {
-    margin-top: 2px;
+    margin-top: 2px !important;
     padding: 1px !important;
-    font-size: 3px;
+    font-size: 3px !important;
     border-width: 1px !important;
   }
 }
