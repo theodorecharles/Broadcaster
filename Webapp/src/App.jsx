@@ -270,6 +270,47 @@ function App() {
     }
   }
 
+  // Handle fullscreen changes - prevent pause on iOS when exiting fullscreen
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const handleFullscreenChange = () => {
+      // When exiting fullscreen, resume playback if it was paused
+      if (!document.fullscreenElement && !document.webkitFullscreenElement && isPoweredOn) {
+        setTimeout(() => {
+          if (video.paused) {
+            video.play().catch(err => console.log('Resume after fullscreen blocked:', err))
+          }
+        }, 100)
+      }
+    }
+
+    const handleWebkitFullscreenChange = () => {
+      // iOS Safari specific - resume when exiting fullscreen
+      if (!video.webkitDisplayingFullscreen && isPoweredOn) {
+        setTimeout(() => {
+          if (video.paused) {
+            video.play().catch(err => console.log('Resume after fullscreen blocked:', err))
+          }
+        }, 100)
+      }
+    }
+
+    // Listen for fullscreen changes
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+    video.addEventListener('webkitendfullscreen', handleWebkitFullscreenChange)
+    video.addEventListener('webkitbeginfullscreen', handleWebkitFullscreenChange)
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+      video.removeEventListener('webkitendfullscreen', handleWebkitFullscreenChange)
+      video.removeEventListener('webkitbeginfullscreen', handleWebkitFullscreenChange)
+    }
+  }, [isPoweredOn])
+
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e) => {
