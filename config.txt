@@ -1,7 +1,7 @@
 # Thanks for using Broadcaster. Configure your preferences below. Be careful!
 
 # channels List
-CHANNEL_LIST=/channels.json
+CHANNEL_LIST=/Users/Ted/Development/Broadcaster/channels.json
 
 ## FFMpeg Setup. Use at your own risk.
 

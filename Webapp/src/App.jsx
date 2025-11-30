@@ -15,6 +15,58 @@ function App() {
   const [showChannelOverlay, setShowChannelOverlay] = useState(false)
   const [showVolumeOverlay, setShowVolumeOverlay] = useState(false)
   const [powerAnimation, setPowerAnimation] = useState(null)
+  const [showMenu, setShowMenu] = useState(false)
+  const [aspectRatio, setAspectRatio] = useState(() => {
+    return localStorage.getItem('tv-aspectRatio') || '16:9'
+  })
+  const [scanlines, setScanlines] = useState(() => {
+    return localStorage.getItem('tv-scanlines') === 'on'
+  })
+  const [tvSize, setTvSize] = useState({ width: 0, height: 0 })
+
+  // Calculate TV size based on window and aspect ratio
+  useEffect(() => {
+    const calculateSize = () => {
+      const padding = 16 * 2 // 1rem = 16px on each side
+      const controlsHeight = 80 // approximate height of controls + gap
+      const borderWidth = 40 // 20px border on each side
+
+      const availableWidth = window.innerWidth - padding - borderWidth
+      const availableHeight = window.innerHeight - padding - controlsHeight - borderWidth
+
+      const ratio = aspectRatio === '4:3' ? 4 / 3 : 16 / 9
+
+      // Calculate dimensions that fit within available space
+      let width = availableWidth
+      let height = width / ratio
+
+      if (height > availableHeight) {
+        height = availableHeight
+        width = height * ratio
+      }
+
+      // Cap max width
+      if (width > 1200) {
+        width = 1200
+        height = width / ratio
+      }
+
+      setTvSize({ width: Math.floor(width), height: Math.floor(height) })
+    }
+
+    calculateSize()
+    window.addEventListener('resize', calculateSize)
+    return () => window.removeEventListener('resize', calculateSize)
+  }, [aspectRatio])
+
+  // Persist settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('tv-aspectRatio', aspectRatio)
+  }, [aspectRatio])
+
+  useEffect(() => {
+    localStorage.setItem('tv-scanlines', scanlines ? 'on' : 'off')
+  }, [scanlines])
 
   // Load channels
   useEffect(() => {
@@ -205,6 +257,13 @@ function App() {
     }
   }
 
+  // Menu toggle
+  const toggleMenu = () => {
+    if (isPoweredOn) {
+      setShowMenu(!showMenu)
+    }
+  }
+
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -233,21 +292,33 @@ function App() {
         case 'P':
           togglePower()
           break
+        case 'm':
+        case 'M':
+          toggleMenu()
+          break
+        case 'Escape':
+          setShowMenu(false)
+          break
       }
     }
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isPoweredOn, channels, currentChannelIndex, currentVolume])
+  }, [isPoweredOn, channels, currentChannelIndex, currentVolume, showMenu])
 
   const currentChannel = channels[currentChannelIndex]
 
   return (
     <div className="tv-container">
       <div className="video-wrapper">
-        <div className={`video-content ${powerAnimation || ''}`}>
+        <div
+          className={`video-content ${powerAnimation || ''}`}
+          style={{ width: tvSize.width, height: tvSize.height }}
+        >
           <video
             ref={videoRef}
+            playsInline
+            webkit-playsinline="true"
             onClick={() => videoRef.current.muted = false}
             style={{ display: showStatic ? 'none' : 'block' }}
           />
@@ -275,10 +346,56 @@ function App() {
               />
             </div>
           </div>
+
+          {showMenu && (
+            <div className="tv-menu">
+              <h2>SETTINGS</h2>
+              <div className="menu-option">
+                <span className="menu-label">ASPECT</span>
+                <div className="menu-toggle">
+                  <button
+                    className={aspectRatio === '16:9' ? 'active' : ''}
+                    onClick={() => setAspectRatio('16:9')}
+                  >
+                    16:9
+                  </button>
+                  <button
+                    className={aspectRatio === '4:3' ? 'active' : ''}
+                    onClick={() => setAspectRatio('4:3')}
+                  >
+                    4:3
+                  </button>
+                </div>
+              </div>
+              <div className="menu-option">
+                <span className="menu-label">SCANLINES</span>
+                <div className="menu-toggle">
+                  <button
+                    className={!scanlines ? 'active' : ''}
+                    onClick={() => setScanlines(false)}
+                  >
+                    OFF
+                  </button>
+                  <button
+                    className={scanlines ? 'active' : ''}
+                    onClick={() => setScanlines(true)}
+                  >
+                    ON
+                  </button>
+                </div>
+              </div>
+              <button className="menu-close" onClick={() => setShowMenu(false)}>
+                CLOSE
+              </button>
+            </div>
+          )}
+
+          {scanlines && <div className="scanlines-overlay"></div>}
         </div>
       </div>
 
       <div className="controls">
+        <div className={`power-led ${isPoweredOn ? 'on' : ''}`}></div>
         <button
           className={`power-btn ${isPoweredOn ? 'on' : ''}`}
           onClick={togglePower}
@@ -313,6 +430,11 @@ function App() {
         <button onClick={toggleFullscreen} title="Fullscreen">
           <svg viewBox="0 0 24 24" width="24" height="24">
             <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" fill="currentColor"/>
+          </svg>
+        </button>
+        <button onClick={toggleMenu} title="Menu">
+          <svg viewBox="0 0 24 24" width="24" height="24">
+            <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" fill="currentColor"/>
           </svg>
         </button>
       </div>
