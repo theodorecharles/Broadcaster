@@ -39,6 +39,7 @@ class PreGenerator {
 
     constructor() {
         this.generationQueue = []
+        this.channelQueues = [] // Store separate queues per channel
         this.currentIndex = 0
         this.totalVideos = 0
         this.isGenerating = false
@@ -85,9 +86,11 @@ class PreGenerator {
      * Add a channel's videos to the generation queue
      */
     queueChannel(channel) {
+        const channelQueue = []
+
         channel.queue.forEach(filePath => {
             if (!this.isAlreadyGenerated(filePath, channel.slug)) {
-                this.generationQueue.push({
+                channelQueue.push({
                     filePath,
                     channel
                 })
@@ -96,8 +99,31 @@ class PreGenerator {
             }
         })
 
+        if (channelQueue.length > 0) {
+            this.channelQueues.push(channelQueue)
+        }
+
+        Log(tag, `Queued ${channelQueue.length} videos for generation`, channel)
+    }
+
+    /**
+     * Build interleaved queue from all channels (round-robin)
+     */
+    buildInterleavedQueue() {
+        this.generationQueue = []
+        let hasMore = true
+
+        while (hasMore) {
+            hasMore = false
+            for (const channelQueue of this.channelQueues) {
+                if (channelQueue.length > 0) {
+                    this.generationQueue.push(channelQueue.shift())
+                    hasMore = true
+                }
+            }
+        }
+
         this.totalVideos = this.generationQueue.length
-        Log(tag, `Queued ${this.generationQueue.length} videos for generation`, channel)
     }
 
     /**
@@ -267,6 +293,9 @@ class PreGenerator {
             return
         }
 
+        // Build interleaved queue before starting
+        this.buildInterleavedQueue()
+
         if (this.generationQueue.length === 0) {
             Log(tag, 'All videos already generated!')
             return
@@ -275,7 +304,7 @@ class PreGenerator {
         this.isGenerating = true
         this.currentIndex = 0
 
-        Log(tag, `Starting generation of ${this.totalVideos} videos...`)
+        Log(tag, `Starting generation of ${this.totalVideos} videos (round-robin across channels)...`)
 
         for (const item of this.generationQueue) {
             this.currentIndex++
