@@ -160,10 +160,17 @@ function App() {
         const video = videoRef.current
         const handleWaiting = () => {
           console.log('Video waiting for data...')
+          // Try to resume after a brief moment
+          setTimeout(() => {
+            if (video.paused) {
+              video.play().catch(() => {})
+            }
+          }, 500)
         }
         const handleStalled = () => {
           console.log('Video stalled, attempting recovery...')
           hls.startLoad()
+          video.play().catch(() => {})
         }
         const handleEnded = () => {
           // Live streams shouldn't end - force reload if this happens
@@ -171,10 +178,18 @@ function App() {
           hls.startLoad()
           video.play().catch(() => {})
         }
+        const handlePause = () => {
+          // Auto-resume if paused unexpectedly (not by user interaction)
+          console.log('Video paused, auto-resuming...')
+          setTimeout(() => {
+            video.play().catch(() => {})
+          }, 100)
+        }
 
         video.addEventListener('waiting', handleWaiting)
         video.addEventListener('stalled', handleStalled)
         video.addEventListener('ended', handleEnded)
+        video.addEventListener('pause', handlePause)
       } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
         videoRef.current.src = playlistUrl
         videoRef.current.play().catch(err => console.log('Autoplay blocked:', err))
