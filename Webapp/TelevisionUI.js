@@ -195,13 +195,22 @@ class TelevisionUI {
         res.set('Cache-Control', 'no-store, no-cache, must-revalidate')
         res.set('Pragma', 'no-cache')
 
-        if (guideCache) {
-            res.json(guideCache)
-        } else {
+        if (!guideCache) {
             // Fallback: generate on first request if cache not ready
             regenerateGuideCache()
-            res.json(guideCache)
         }
+
+        // Filter out any channels with empty schedules before sending
+        const filteredGuide = {
+            dayStart: guideCache.dayStart,
+            channels: {}
+        }
+        for (const [slug, channel] of Object.entries(guideCache.channels)) {
+            if (channel.schedule && channel.schedule.length > 0) {
+                filteredGuide.channels[slug] = channel
+            }
+        }
+        res.json(filteredGuide)
     })
 
     // Single channel schedule
@@ -295,7 +304,7 @@ class TelevisionUI {
     })
 
     this.app.listen(WEB_UI_PORT, async () => {
-        Log(tag, `Webapp is live at http://tv:${WEB_UI_PORT}`)
+        Log(tag, `Webapp is live at http://localhost:${WEB_UI_PORT}`)
     })
 
   }
@@ -305,3 +314,6 @@ class TelevisionUI {
 module.exports = () => {
   return ui ? ui : ui = new TelevisionUI()
 }
+
+// Export guide cache regeneration for use by PreGenerator
+module.exports.regenerateGuideCache = regenerateGuideCache

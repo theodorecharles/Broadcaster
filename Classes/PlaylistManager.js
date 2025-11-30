@@ -67,8 +67,14 @@ class PlaylistManager {
         this.channel.queue.forEach((filePath, index) => {
             const videoHash = this.getVideoHash(filePath)
             const playlistPath = this.getVideoPlaylistPath(filePath)
+            const metadataPath = path.join(path.dirname(playlistPath), 'metadata.json')
 
             if (!fs.existsSync(playlistPath)) {
+                return
+            }
+
+            // Require metadata.json to exist - it's only written after successful transcoding
+            if (!fs.existsSync(metadataPath)) {
                 return
             }
 
@@ -346,6 +352,14 @@ class PlaylistManager {
         const currentOffset = this.getCurrentOffset()
         const normalizedOffset = currentOffset % totalDuration
 
+        // Calculate buffer offset to match what the player actually shows
+        // The playlist includes bufferAhead segments past "now", and HLS.js seeks to live edge
+        // So the player is actually showing content from ~bufferAhead segments in the future
+        const bufferAheadSegments = 18 // Must match createRollingPlaylist
+        const avgSegmentDuration = totalDuration / allSegments.length
+        const bufferOffsetMs = bufferAheadSegments * avgSegmentDuration * 1000
+        const playerTime = now + bufferOffsetMs
+
         // Calculate the loop start time (when the current loop began)
         const loopStartTime = now - (normalizedOffset * 1000)
 
@@ -378,7 +392,8 @@ class PlaylistManager {
                         startTime: videoStartMs,
                         endTime: videoEndMs,
                         duration: video.duration,
-                        isCurrent: videoStartMs <= now && videoEndMs > now
+                        // Use playerTime (now + buffer) to match what the player is actually showing
+                        isCurrent: videoStartMs <= playerTime && videoEndMs > playerTime
                     })
                 }
             })

@@ -2,6 +2,30 @@ import { useState, useEffect, useRef } from 'react'
 import Hls from 'hls.js'
 import './App.css'
 
+// Marquee component that only animates when text is truncated
+function MarqueeTitle({ title }) {
+  const containerRef = useRef(null)
+  const textRef = useRef(null)
+  const [isOverflowing, setIsOverflowing] = useState(false)
+
+  useEffect(() => {
+    const checkOverflow = () => {
+      if (containerRef.current && textRef.current) {
+        setIsOverflowing(textRef.current.scrollWidth > containerRef.current.clientWidth)
+      }
+    }
+    checkOverflow()
+    window.addEventListener('resize', checkOverflow)
+    return () => window.removeEventListener('resize', checkOverflow)
+  }, [title])
+
+  return (
+    <div className="guide-show-title" ref={containerRef}>
+      <span ref={textRef} className={isOverflowing ? 'marquee' : ''}>{title}</span>
+    </div>
+  )
+}
+
 function App() {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
@@ -596,7 +620,7 @@ function App() {
                             }}
                           >
                             <div className="guide-show-time">{formatTime(show.startTime)}</div>
-                            <div className="guide-show-title">{show.title}</div>
+                            <MarqueeTitle title={show.title} />
                             <div className="guide-show-duration">{formatDuration(show.duration)}</div>
                           </div>
                         )})}

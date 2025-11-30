@@ -3,6 +3,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const Log = require('./Log.js')
+const { regenerateGuideCache } = require('../Webapp/TelevisionUI.js')
 const tag = 'PreGenerator'
 
 const { CACHE_DIR,
@@ -365,6 +366,9 @@ class PreGenerator {
                         path.join(outputDir, 'metadata.json'),
                         JSON.stringify(metadata, null, 2)
                     )
+
+                    // Refresh guide cache immediately so new content appears
+                    regenerateGuideCache()
 
                     resolve()
                 } else {

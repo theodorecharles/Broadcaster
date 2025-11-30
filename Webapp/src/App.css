@@ -670,7 +670,31 @@ video::-webkit-media-controls-picture-in-picture-button {
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  position: relative;
+}
+
+.guide-show-title span {
+  display: inline-block;
+}
+
+/* Only animate when text is truncated */
+.guide-show-title span.marquee {
+  padding-right: 20px;
+  animation: marquee 8s linear infinite alternate;
+}
+
+@keyframes marquee {
+  0%, 20% {
+    transform: translateX(0);
+  }
+  80%, 100% {
+    transform: translateX(calc(-100% + 100cqw));
+  }
+}
+
+/* Container query for marquee to know available width */
+.guide-show {
+  container-type: inline-size;
 }
 
 .guide-show-duration {
@@ -727,6 +751,10 @@ video::-webkit-media-controls-picture-in-picture-button {
 
   .guide-show-title {
     font-size: 9px;
+  }
+
+  .guide-show-title span.marquee {
+    animation-duration: 6s;
   }
 
   .guide-show-duration {
