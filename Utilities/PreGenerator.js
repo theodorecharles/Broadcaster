@@ -118,6 +118,14 @@ class PreGenerator {
                 }
             }
 
+            // Verify metadata.json exists - it's only written after successful transcoding
+            const metadataPath = path.join(outputDir, 'metadata.json')
+            if (!fs.existsSync(metadataPath)) {
+                Log(tag, `Incomplete generation detected for ${fileName} - missing metadata.json`)
+                this.deletePartialGeneration(outputDir, fileName)
+                return false
+            }
+
             return true
         } catch (e) {
             return false
