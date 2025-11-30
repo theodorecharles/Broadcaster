@@ -529,15 +529,18 @@ function App() {
               </div>
               <div className="guide-body">
                 <div className="guide-channels" ref={channelsRef}>
-                  {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => (
-                    <div
-                      key={slug}
-                      className={`guide-channel-name ${channels[currentChannelIndex]?.slug === slug ? 'current' : ''}`}
-                      onClick={() => selectChannelFromGuide(slug)}
-                    >
-                      {channelData.name}
-                    </div>
-                  ))}
+                  {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => {
+                    const channelNum = channels.findIndex(c => c.slug === slug) + 1
+                    return (
+                      <div
+                        key={slug}
+                        className={`guide-channel-name ${channels[currentChannelIndex]?.slug === slug ? 'current' : ''}`}
+                        onClick={() => selectChannelFromGuide(slug)}
+                      >
+                        {channelNum}. {channelData.name}
+                      </div>
+                    )
+                  })}
                 </div>
                 <div className="guide-schedule-container" ref={guideRef} onScroll={handleScheduleScroll}>
                   {/* Current time indicator line */}
