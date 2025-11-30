@@ -127,6 +127,7 @@ class PreGenerator {
      */
     queueChannel(channel) {
         const channelQueue = []
+        let skippedCount = 0
 
         channel.queue.forEach(filePath => {
             if (!this.isAlreadyGenerated(filePath, channel.slug)) {
@@ -135,7 +136,7 @@ class PreGenerator {
                     channel
                 })
             } else {
-                Log(tag, `Skipping ${path.basename(filePath)} (already generated)`, channel)
+                skippedCount++
             }
         })
 
@@ -143,7 +144,8 @@ class PreGenerator {
             this.channelQueues.push(channelQueue)
         }
 
-        Log(tag, `Queued ${channelQueue.length} videos for generation`, channel)
+        const skippedMsg = skippedCount > 0 ? ` (${skippedCount} already generated)` : ''
+        Log(tag, `Queued ${channelQueue.length} videos for generation${skippedMsg}`, channel)
     }
 
     /**
