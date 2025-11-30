@@ -9,12 +9,12 @@ CHANNEL_LIST=/Users/Ted/Development/Broadcaster/channels.json
 # Intel CPU with Intel QuickSync.
 # Using h264_videotoolbox for Mac hardware encoding
 VIDEO_CODEC=h264_videotoolbox
-VIDEO_CRF=50
+VIDEO_CRF=35
 VIDEO_PRESET=veryfast
 VIDEO_FILTER=yadif
 AUDIO_CODEC=aac
-AUDIO_BITRATE=128k
-DIMENSIONS=480x360
+AUDIO_BITRATE=192k
+DIMENSIONS=640x480
 FFMPEG_SEEK_AHEAD_SECONDS=30
 
 # Choose the length of HTTP Live Streaming .ts clips. Apple recommends 6 seconds,

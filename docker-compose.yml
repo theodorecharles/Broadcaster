@@ -40,11 +40,11 @@ services:
       # FFmpeg settings (GPU-accelerated)
       - VIDEO_CODEC=h264_nvenc
       - VIDEO_PRESET=p4
-      - VIDEO_CRF=50
+      - VIDEO_CRF=35
       - VIDEO_FILTER=yadif_cuda
       - AUDIO_CODEC=aac
-      - AUDIO_BITRATE=128k
-      - DIMENSIONS=480x360
+      - AUDIO_BITRATE=192k
+      - DIMENSIONS=640x480
       - HLS_SEGMENT_LENGTH_SECONDS=1
       - SUPPORTED_FORMATS=mov,mp4,mkv,avi,ts,m2ts,webm,divx,mpg
       - LOG_LEVEL=verbose

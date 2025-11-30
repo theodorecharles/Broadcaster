@@ -6,16 +6,16 @@ CHANNEL_LIST=/data/channels.json
 ## FFMpeg Setup
 # Use h264_nvenc for NVIDIA GPU encoding, libx264 for CPU fallback
 VIDEO_CODEC=h264_nvenc
-VIDEO_CRF=23
+VIDEO_CRF=35
 VIDEO_PRESET=fast
 VIDEO_FILTER=yadif
 AUDIO_CODEC=aac
-AUDIO_BITRATE=128k
+AUDIO_BITRATE=192k
 DIMENSIONS=640x480
 FFMPEG_SEEK_AHEAD_SECONDS=30
 
 # HLS segment length (Apple recommends 6 seconds)
-HLS_SEGMENT_LENGTH_SECONDS=6
+HLS_SEGMENT_LENGTH_SECONDS=1
 
 # Supported video formats
 SUPPORTED_FORMATS=mov,mp4,mkv,avi,ts,m2ts,webm,divx,mpg
