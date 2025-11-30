@@ -113,18 +113,18 @@ function App() {
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: false,
-          backBufferLength: 90,
           liveDurationInfinity: true,
-          // Buffer 60 seconds ahead minimum, up to 120 seconds
-          maxBufferLength: 60,
-          maxMaxBufferLength: 120,
-          maxBufferSize: 120 * 1000 * 1000,
+          // Buffer settings - load 120 seconds ahead
+          maxBufferLength: 120,
+          maxMaxBufferLength: 180,
+          maxBufferSize: 200 * 1000 * 1000,
           maxBufferHole: 0.5,
-          // Play 30 seconds behind live edge to ensure buffer ahead
-          liveSyncDurationCount: 10,
-          liveMaxLatencyDurationCount: 15,
-          // Don't drop frames to catch up
-          liveBackBufferLength: 90
+          // Keep 90 seconds of played content
+          backBufferLength: 90,
+          liveBackBufferLength: 90,
+          // Play 30+ seconds behind live edge so we always have buffer ahead
+          liveSyncDurationCount: 6,
+          liveMaxLatencyDurationCount: 12
         })
 
         hls.loadSource(playlistUrl)
