@@ -148,7 +148,33 @@ function App() {
           }
         })
 
+        // Handle buffer stalls - keep trying to load more content
+        hls.on(Hls.Events.BUFFER_EOS, () => {
+          console.log('Buffer reached end of stream, reloading...')
+          hls.startLoad()
+        })
+
         hlsRef.current = hls
+
+        // Auto-resume if video stalls or pauses unexpectedly
+        const video = videoRef.current
+        const handleWaiting = () => {
+          console.log('Video waiting for data...')
+        }
+        const handleStalled = () => {
+          console.log('Video stalled, attempting recovery...')
+          hls.startLoad()
+        }
+        const handleEnded = () => {
+          // Live streams shouldn't end - force reload if this happens
+          console.log('Video ended unexpectedly, restarting stream...')
+          hls.startLoad()
+          video.play().catch(() => {})
+        }
+
+        video.addEventListener('waiting', handleWaiting)
+        video.addEventListener('stalled', handleStalled)
+        video.addEventListener('ended', handleEnded)
       } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
         videoRef.current.src = playlistUrl
         videoRef.current.play().catch(err => console.log('Autoplay blocked:', err))
