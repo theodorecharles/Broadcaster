@@ -99,7 +99,7 @@ class TelevisionUI {
         res.send(JSON.stringify(manifest))
     })
 
-    // Debug endpoint to check playlist stats
+    // Debug endpoint to check playlist stats and current playback
     this.app.get(`/:slug/debug`, function(req,res){
         const slug = req.params.slug
         const channel = ChannelPool().queue.find(c => c.slug === slug)
@@ -110,13 +110,47 @@ class TelevisionUI {
         const allSegments = channel.playlistManager.generateMasterPlaylist()
         const videoHashes = [...new Set(allSegments.map(s => s.path.split('/')[3]))]
         const offset = channel.playlistManager.getCurrentOffset()
+        const totalDuration = allSegments.length > 0 ? allSegments[allSegments.length - 1].timestamp : 0
+        const normalizedOffset = offset % totalDuration
+
+        // Find current segment/video
+        let currentSegmentIndex = 0
+        for (let i = 0; i < allSegments.length; i++) {
+            if (allSegments[i].timestamp > normalizedOffset) {
+                currentSegmentIndex = i
+                break
+            }
+        }
+        const currentSegment = allSegments[currentSegmentIndex]
+        const currentVideoPath = currentSegment ? channel.queue[currentSegment.videoIndex] : null
+        const currentVideoName = currentVideoPath ? channel.playlistManager.getVideoDisplayName(currentVideoPath) : null
+
+        // Get schedule's "current" show
+        const schedule = channel.playlistManager.getSchedule()
+        const now = Date.now()
+        const currentShow = schedule.find(s => s.startTime <= now && s.endTime > now)
+
         res.json({
             channelName: channel.name,
+            serverTime: new Date().toISOString(),
+            channelStartTime: new Date(channel.startTime).toISOString(),
+            currentOffset: Math.round(offset),
+            normalizedOffset: Math.round(normalizedOffset),
+            totalDuration: Math.round(totalDuration),
             queueLength: channel.queue.length,
             totalSegments: allSegments.length,
             uniqueVideos: videoHashes.length,
-            currentOffset: offset,
-            totalDuration: allSegments.length > 0 ? allSegments[allSegments.length - 1].timestamp : 0
+            playlistSays: {
+                segmentIndex: currentSegmentIndex,
+                videoIndex: currentSegment?.videoIndex,
+                videoName: currentVideoName,
+                videoPath: currentVideoPath
+            },
+            scheduleSays: currentShow ? {
+                title: currentShow.title,
+                startTime: new Date(currentShow.startTime).toISOString(),
+                endTime: new Date(currentShow.endTime).toISOString()
+            } : null
         })
     })
 
