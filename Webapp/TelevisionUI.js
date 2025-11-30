@@ -41,7 +41,15 @@ class TelevisionUI {
     // Copy static.gif
     fs.copyFileSync(path.join(__dirname, 'static.gif'), path.join(CACHE_DIR, 'static.gif'))
 
-    this.app.use(express.static(CACHE_DIR))
+    // Serve static files with no-cache for .ts segments
+    this.app.use(express.static(CACHE_DIR, {
+        setHeaders: (res, filePath) => {
+            if (filePath.endsWith('.ts')) {
+                // Don't cache video segments in browser
+                res.set('Cache-Control', 'no-store')
+            }
+        }
+    }))
     this.app.use(compression())
 
     // Dynamic manifest - always reflects current channelPool state
