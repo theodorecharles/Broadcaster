@@ -18,10 +18,33 @@ const ChannelPool = require('../Utilities/ChannelPool.js')
 
 var ui = null
 
-// Guide cache - regenerate every 60 seconds
+// Guide cache - pre-generated and refreshed in background
 let guideCache = null
-let guideCacheTime = 0
-const GUIDE_CACHE_TTL = 60 * 1000
+const GUIDE_REFRESH_INTERVAL = 60 * 1000
+
+// Function to regenerate guide cache
+function regenerateGuideCache() {
+    const guide = {
+        dayStart: null,
+        channels: {}
+    }
+
+    ChannelPool().queue.forEach(channel => {
+        if (channel.started && channel.playlistManager) {
+            if (!guide.dayStart) {
+                guide.dayStart = channel.playlistManager.getDayStart()
+            }
+            guide.channels[channel.slug] = {
+                name: channel.name,
+                slug: channel.slug,
+                schedule: channel.playlistManager.getSchedule()
+            }
+        }
+    })
+
+    guideCache = guide
+    Log('TelevisionUI', `Guide cache regenerated with ${Object.keys(guide.channels).length} channels`)
+}
 
 class TelevisionUI {
 
@@ -37,8 +60,9 @@ class TelevisionUI {
 
     fs.mkdirSync(channelsDir, { recursive: true })
 
-    // Copy static directory
+    // Copy static directories (16:9 and 4:3 versions)
     fs.cpSync(path.join(__dirname, 'static'), path.join(channelsDir, 'static'), { recursive: true })
+    fs.cpSync(path.join(__dirname, 'static-4x3'), path.join(channelsDir, 'static-4x3'), { recursive: true })
 
     // Copy built React app (dist folder)
     fs.cpSync(path.join(__dirname, 'dist'), CACHE_DIR, { recursive: true, force: true })
@@ -96,41 +120,21 @@ class TelevisionUI {
         })
     })
 
-    // TV Guide API - returns full day schedule for all channels (3am to 3am)
-    // Cached for performance since generateMasterPlaylist reads many files
+    // Pre-generate guide cache and refresh every 60 seconds
+    setTimeout(() => {
+        regenerateGuideCache()
+        setInterval(regenerateGuideCache, GUIDE_REFRESH_INTERVAL)
+    }, 2000) // Wait 2 seconds for channels to be fully started
+
+    // TV Guide API - returns pre-cached guide instantly
     this.app.get(`/api/guide`, function(req,res){
-        const now = Date.now()
-
-        // Return cached guide if still fresh
-        if (guideCache && (now - guideCacheTime) < GUIDE_CACHE_TTL) {
+        if (guideCache) {
             res.json(guideCache)
-            return
+        } else {
+            // Fallback: generate on first request if cache not ready
+            regenerateGuideCache()
+            res.json(guideCache)
         }
-
-        // Generate fresh guide data
-        const guide = {
-            dayStart: null,
-            channels: {}
-        }
-
-        ChannelPool().queue.forEach(channel => {
-            if (channel.started && channel.playlistManager) {
-                if (!guide.dayStart) {
-                    guide.dayStart = channel.playlistManager.getDayStart()
-                }
-                guide.channels[channel.slug] = {
-                    name: channel.name,
-                    slug: channel.slug,
-                    schedule: channel.playlistManager.getSchedule()
-                }
-            }
-        })
-
-        // Update cache
-        guideCache = guide
-        guideCacheTime = now
-
-        res.json(guide)
     })
 
     // Single channel schedule

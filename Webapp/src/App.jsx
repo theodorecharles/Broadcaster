@@ -61,9 +61,13 @@ function App() {
     return () => window.removeEventListener('resize', calculateSize)
   }, [aspectRatio])
 
-  // Persist settings to localStorage
+  // Persist settings to localStorage and reload static if playing
   useEffect(() => {
     localStorage.setItem('tv-aspectRatio', aspectRatio)
+    // Reload static channel if currently showing static (channel index -1)
+    if (isPoweredOn && currentChannelIndex === -1) {
+      playStaticChannel()
+    }
   }, [aspectRatio])
 
   useEffect(() => {
@@ -215,7 +219,9 @@ function App() {
 
   // Play static channel
   const playStaticChannel = () => {
-    const playlistUrl = '/channels/static/_.m3u8'
+    const playlistUrl = aspectRatio === '4:3'
+      ? '/channels/static-4x3/_.m3u8'
+      : '/channels/static/_.m3u8'
 
     if (Hls.isSupported()) {
       const hls = new Hls({
@@ -244,8 +250,17 @@ function App() {
       })
 
       hlsRef.current = hls
+
+      // Loop static video when it ends
+      const video = videoRef.current
+      const handleStaticEnded = () => {
+        video.currentTime = 0
+        video.play().catch(() => {})
+      }
+      video.addEventListener('ended', handleStaticEnded)
     } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
       videoRef.current.src = playlistUrl
+      videoRef.current.loop = true
       videoRef.current.play().catch(err => console.log('Autoplay blocked:', err))
       setShowStatic(false)
     }
@@ -558,10 +573,13 @@ function App() {
                   <div className="guide-schedule-scroll">
                     {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => (
                       <div key={slug} className="guide-channel-row">
-                        {channelData.schedule.map((show, idx) => (
+                        {channelData.schedule.map((show, idx) => {
+                          const now = Date.now()
+                          const isCurrent = show.startTime <= now && show.endTime > now
+                          return (
                           <div
                             key={idx}
-                            className={`guide-show ${show.isCurrent ? 'current' : ''}`}
+                            className={`guide-show ${isCurrent ? 'current' : ''}`}
                             style={{
                               width: show.duration / 60 * 10,
                               left: (show.startTime - guideData.dayStart) / (60 * 1000) * 10
@@ -571,7 +589,7 @@ function App() {
                             <div className="guide-show-title">{show.title}</div>
                             <div className="guide-show-duration">{formatDuration(show.duration)}</div>
                           </div>
-                        ))}
+                        )})}
                       </div>
                     ))}
                   </div>
