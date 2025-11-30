@@ -129,23 +129,50 @@ class PlaylistManager {
             }
         }
 
-        // Include segments behind and ahead, wrapping around for loop
-        // windowAhead = 180 segments ≈ 3-6 minutes of content at 1-2 sec/segment
+        // Include segments behind current position
         const windowBehind = 30
-        const windowAhead = 180
         const totalSegments = allSegments.length
 
         let segmentsInWindow = []
 
-        // Gather segments, wrapping around if needed
-        for (let i = -windowBehind; i < windowAhead; i++) {
-            const idx = currentIndex + i
-            if (idx >= 0 && idx < totalSegments) {
+        // Add segments behind current position
+        for (let i = windowBehind; i > 0; i--) {
+            const idx = currentIndex - i
+            if (idx >= 0) {
                 segmentsInWindow.push(allSegments[idx])
-            } else if (idx >= totalSegments) {
-                // Wrap around to beginning for continuous loop
-                const wrappedIdx = idx % totalSegments
-                segmentsInWindow.push(allSegments[wrappedIdx])
+            }
+        }
+
+        // Find current video index
+        const currentVideoIndex = allSegments[currentIndex].videoIndex
+
+        // Add all remaining segments from current video + at least 2 more complete videos
+        // This ensures smooth transitions - player always has future content buffered
+        let videosIncluded = 0
+        let lastVideoSeen = currentVideoIndex
+
+        for (let i = currentIndex; i < totalSegments && videosIncluded < 3; i++) {
+            segmentsInWindow.push(allSegments[i])
+            if (allSegments[i].videoIndex !== lastVideoSeen) {
+                videosIncluded++
+                lastVideoSeen = allSegments[i].videoIndex
+            }
+        }
+
+        // If we hit the end, wrap around to include more videos
+        if (videosIncluded < 3) {
+            for (let i = 0; i < totalSegments && videosIncluded < 3; i++) {
+                const segment = allSegments[i]
+                // Don't duplicate segments we already added
+                if (segment.videoIndex <= currentVideoIndex) {
+                    segmentsInWindow.push(segment)
+                    if (segment.videoIndex !== lastVideoSeen) {
+                        videosIncluded++
+                        lastVideoSeen = segment.videoIndex
+                    }
+                } else {
+                    break
+                }
             }
         }
 
