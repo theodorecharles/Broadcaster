@@ -6,12 +6,13 @@ import './App.css'
 function MarqueeTitle({ title }) {
   const containerRef = useRef(null)
   const textRef = useRef(null)
-  const [isOverflowing, setIsOverflowing] = useState(false)
+  const [overflowAmount, setOverflowAmount] = useState(0)
 
   useEffect(() => {
     const checkOverflow = () => {
       if (containerRef.current && textRef.current) {
-        setIsOverflowing(textRef.current.scrollWidth > containerRef.current.clientWidth)
+        const overflow = textRef.current.scrollWidth - containerRef.current.clientWidth
+        setOverflowAmount(overflow > 0 ? overflow : 0)
       }
     }
     checkOverflow()
@@ -21,7 +22,11 @@ function MarqueeTitle({ title }) {
 
   return (
     <div className="guide-show-title" ref={containerRef}>
-      <span ref={textRef} className={isOverflowing ? 'marquee' : ''}>{title}</span>
+      <span
+        ref={textRef}
+        className={overflowAmount > 0 ? 'marquee' : ''}
+        style={overflowAmount > 0 ? { '--scroll-distance': `-${overflowAmount}px` } : undefined}
+      >{title}</span>
     </div>
   )
 }
