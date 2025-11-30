@@ -135,27 +135,23 @@ class PlaylistManager {
             }
         }
 
-        // Include segments behind and ahead of current position
-        // Use large windows to ensure smooth playback across video transitions
-        const windowBehind = 30
-        const windowAhead = 2000  // ~30+ minutes at 1 sec/segment
+        // For live TV simulation: playlist should only include "aired" content
+        // HLS.js will seek to the live edge (end of playlist), so we only include
+        // segments from the beginning up to current position + small buffer
+        const bufferAhead = 18  // ~3 minutes buffer ahead of "now"
         const totalSegments = allSegments.length
 
         let segmentsInWindow = []
 
-        // Gather segments with wrap-around support
-        for (let i = -windowBehind; i < windowAhead; i++) {
-            let idx = currentIndex + i
-            if (idx < 0) continue
-            if (idx >= totalSegments) {
-                idx = idx % totalSegments  // Wrap around for continuous loop
-            }
-            segmentsInWindow.push(allSegments[idx])
+        // Include segments from start of current loop up to current position + buffer
+        const endIndex = Math.min(currentIndex + bufferAhead, totalSegments)
+        for (let i = 0; i < endIndex; i++) {
+            segmentsInWindow.push(allSegments[i])
         }
 
-        // Calculate sequence number - use loop count * totalSegments + position for monotonic increase
+        // Calculate sequence number - increases monotonically across loops
         const loopCount = Math.floor(offsetSeconds / totalDuration)
-        const mediaSequence = loopCount * totalSegments + Math.max(0, currentIndex - windowBehind)
+        const mediaSequence = loopCount * totalSegments
 
         // Find max segment duration for TARGETDURATION (HLS spec requires it >= max segment)
         const maxDuration = Math.ceil(Math.max(...segmentsInWindow.map(s => s.duration), 2))
