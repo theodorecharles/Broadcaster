@@ -115,10 +115,15 @@ function App() {
           lowLatencyMode: false,
           backBufferLength: 90,
           liveDurationInfinity: true,
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
-          maxBufferSize: 60 * 1000 * 1000,
-          maxBufferHole: 0.5
+          maxBufferLength: 120,
+          maxMaxBufferLength: 240,
+          maxBufferSize: 120 * 1000 * 1000,
+          maxBufferHole: 0.5,
+          levelLoadingMaxRetry: 4,
+          manifestLoadingMaxRetry: 4,
+          // Reduce playlist polling frequency - check every 5 seconds instead of every segment duration
+          levelLoadingTimeOut: 10000,
+          manifestLoadingTimeOut: 10000
         })
 
         hls.loadSource(playlistUrl)

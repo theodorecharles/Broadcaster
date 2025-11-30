@@ -129,9 +129,10 @@ class PlaylistManager {
             }
         }
 
-        // Include 30 seconds behind and 60 seconds ahead, wrapping around for loop
+        // Include segments behind and ahead, wrapping around for loop
+        // windowAhead = 180 segments ≈ 3-6 minutes of content at 1-2 sec/segment
         const windowBehind = 30
-        const windowAhead = 60
+        const windowAhead = 180
         const totalSegments = allSegments.length
 
         let segmentsInWindow = []
@@ -153,9 +154,10 @@ class PlaylistManager {
         const mediaSequence = loopCount * totalSegments + Math.max(0, currentIndex - windowBehind)
 
         // Build playlist for live streaming (no ENDLIST tag)
+        // TARGETDURATION affects how often HLS.js polls for new playlist (polls at ~targetDuration/2)
         let playlist = '#EXTM3U\n'
         playlist += '#EXT-X-VERSION:3\n'
-        playlist += '#EXT-X-TARGETDURATION:2\n'
+        playlist += '#EXT-X-TARGETDURATION:10\n'
         playlist += `#EXT-X-MEDIA-SEQUENCE:${mediaSequence}\n`
 
         // Add segments in window, with discontinuity tags at video transitions
