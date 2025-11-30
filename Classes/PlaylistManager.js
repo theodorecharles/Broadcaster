@@ -10,7 +10,6 @@ class PlaylistManager {
     constructor(channel) {
         this.channel = channel
         this.currentIndex = 0
-        this.startTime = null
     }
 
     /**
@@ -427,23 +426,19 @@ class PlaylistManager {
 
     /**
      * Start the playlist manager
-     * Uses actual start time for continuous playback
      */
     start() {
-        // Use actual start time - playback is continuous, never resets
-        if (!this.startTime) {
-            this.startTime = Date.now()
-        }
         this.updateManifest()
         Log(tag, 'Playlist manager started', this.channel)
     }
 
     /**
      * Get current time offset in seconds
+     * Uses Channel's startTime to stay in sync with actual playback
      */
     getCurrentOffset() {
-        if (!this.startTime) return 0
-        return (Date.now() - this.startTime) / 1000
+        if (!this.channel.startTime) return 0
+        return (Date.now() - this.channel.startTime) / 1000
     }
 }
 
