@@ -665,7 +665,9 @@ video::-webkit-media-controls-picture-in-picture-button {
   font-size: 18px;
   font-weight: bold;
   line-height: 1.4;
-  word-wrap: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .guide-show-duration {
