@@ -438,7 +438,7 @@ video::-webkit-media-controls-picture-in-picture-button {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.95);
+  background: #0000008c;
   z-index: 60;
   display: flex;
   flex-direction: column;
@@ -463,11 +463,54 @@ video::-webkit-media-controls-picture-in-picture-button {
   flex-shrink: 0;
 }
 
+.guide-settings {
+  display: flex;
+  gap: 20px;
+  margin-left: auto;
+}
+
+.guide-setting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guide-setting span {
+  color: #0f0;
+  text-shadow: 0 0 5px #0f0;
+  font-size: 12px;
+}
+
+.guide-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.guide-toggle button {
+  background: transparent;
+  border: 1px solid #0a0;
+  color: #0a0;
+  padding: 4px 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.guide-toggle button:hover {
+  background: rgba(0, 255, 0, 0.1);
+}
+
+.guide-toggle button.active {
+  background: #0f0;
+  color: #000;
+  border-color: #0f0;
+}
+
 .guide-time-now {
   color: #0f0;
   text-shadow: 0 0 5px #0f0;
   font-size: 18px;
-  margin-left: auto;
 }
 
 .guide-close {
@@ -497,8 +540,8 @@ video::-webkit-media-controls-picture-in-picture-button {
 }
 
 .guide-channels {
-  width: 120px;
-  min-width: 120px;
+  width: 160px;
+  min-width: 160px;
   flex-shrink: 0;
   overflow-y: auto;
   background: #1a1a1a;
@@ -506,11 +549,11 @@ video::-webkit-media-controls-picture-in-picture-button {
 }
 
 .guide-channel-name {
-  height: 70px;
+  height: 90px;
   padding: 10px;
   color: #0f0;
   text-shadow: 0 0 5px #0f0;
-  font-size: 11px;
+  font-size: 16px;
   font-weight: bold;
   display: flex;
   align-items: center;
@@ -519,6 +562,8 @@ video::-webkit-media-controls-picture-in-picture-button {
   cursor: pointer;
   border-bottom: 1px solid #333;
   transition: all 0.2s;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .guide-channel-name:hover {
@@ -536,6 +581,19 @@ video::-webkit-media-controls-picture-in-picture-button {
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: #0f0 #111;
+  position: relative;
+}
+
+/* Current time indicator line */
+.guide-now-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #f00;
+  box-shadow: 0 0 10px #f00, 0 0 20px #f00;
+  z-index: 100;
+  pointer-events: none;
 }
 
 .guide-schedule-container::-webkit-scrollbar {
@@ -564,13 +622,14 @@ video::-webkit-media-controls-picture-in-picture-button {
 
 .guide-channel-row {
   display: flex;
-  height: 70px;
+  height: 90px;
   border-bottom: 1px solid #333;
+  flex-shrink: 0;
 }
 
 .guide-show {
-  height: 70px;
-  padding: 8px 12px;
+  height: 90px;
+  padding: 10px 12px;
   border-right: 1px solid #444;
   background: #111;
   display: flex;
@@ -592,26 +651,23 @@ video::-webkit-media-controls-picture-in-picture-button {
 
 .guide-show-time {
   color: #0a0;
-  font-size: 10px;
-  margin-bottom: 4px;
+  font-size: 16px;
+  margin-bottom: 6px;
   white-space: nowrap;
 }
 
 .guide-show-title {
   color: #fff;
-  font-size: 11px;
+  font-size: 18px;
   font-weight: bold;
-  line-height: 1.3;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  line-height: 1.4;
+  word-wrap: break-word;
 }
 
 .guide-show-duration {
   color: #666;
-  font-size: 10px;
-  margin-top: 4px;
+  font-size: 14px;
+  margin-top: 6px;
   white-space: nowrap;
 }
 
@@ -641,17 +697,17 @@ video::-webkit-media-controls-picture-in-picture-button {
   }
 
   .guide-channel-name {
-    height: 60px;
+    height: 70px;
     font-size: 9px;
     padding: 6px;
   }
 
   .guide-channel-row {
-    height: 60px;
+    height: 70px;
   }
 
   .guide-show {
-    height: 60px;
+    height: 70px;
     padding: 6px 10px;
   }
 

@@ -91,17 +91,22 @@ class TelevisionUI {
         })
     })
 
-    // TV Guide API - returns schedule for all channels
+    // TV Guide API - returns full day schedule for all channels (3am to 3am)
     this.app.get(`/api/guide`, function(req,res){
-        const hoursAhead = parseInt(req.query.hours) || 24
-        const guide = {}
+        const guide = {
+            dayStart: null,
+            channels: {}
+        }
 
         ChannelPool().queue.forEach(channel => {
             if (channel.started && channel.playlistManager) {
-                guide[channel.slug] = {
+                if (!guide.dayStart) {
+                    guide.dayStart = channel.playlistManager.getDayStart()
+                }
+                guide.channels[channel.slug] = {
                     name: channel.name,
                     slug: channel.slug,
-                    schedule: channel.playlistManager.getSchedule(hoursAhead)
+                    schedule: channel.playlistManager.getSchedule()
                 }
             }
         })
@@ -112,7 +117,6 @@ class TelevisionUI {
     // Single channel schedule
     this.app.get(`/:slug/schedule`, function(req,res){
         const slug = req.params.slug
-        const hoursAhead = parseInt(req.query.hours) || 24
         const channel = ChannelPool().queue.find(c => c.slug === slug)
 
         if (!channel) {
@@ -128,7 +132,8 @@ class TelevisionUI {
         res.json({
             name: channel.name,
             slug: channel.slug,
-            schedule: channel.playlistManager.getSchedule(hoursAhead)
+            dayStart: channel.playlistManager.getDayStart(),
+            schedule: channel.playlistManager.getSchedule()
         })
     })
 

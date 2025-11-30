@@ -232,33 +232,84 @@ class PlaylistManager {
     }
 
     /**
+     * Parse a filename to extract just the episode/movie title
+     * Handles patterns like:
+     * - "Show Name - S01E01 - Episode Title"
+     * - "Show Name S01E01 Episode Title"
+     * - "Movie Name (2024)"
+     */
+    parseTitle(filename) {
+        // Try to extract episode title after "S01E01 - " pattern
+        const episodeMatch = filename.match(/[Ss]\d+[Ee]\d+\s*[-–]\s*(.+)$/)
+        if (episodeMatch) {
+            return episodeMatch[1].trim()
+        }
+
+        // Try pattern with just episode number like "Show - 01 - Title"
+        const numMatch = filename.match(/[-–]\s*\d+\s*[-–]\s*(.+)$/)
+        if (numMatch) {
+            return numMatch[1].trim()
+        }
+
+        // Try to get text after last " - " for "Show Name - Episode Title"
+        const dashParts = filename.split(/\s*[-–]\s*/)
+        if (dashParts.length >= 2) {
+            // Return the last part if it's not just numbers
+            const lastPart = dashParts[dashParts.length - 1]
+            if (!/^\d+$/.test(lastPart)) {
+                return lastPart.trim()
+            }
+        }
+
+        // For movies, try to remove year like "(2024)" or "[2024]"
+        const movieClean = filename.replace(/\s*[\(\[]\d{4}[\)\]]\s*$/, '').trim()
+        if (movieClean !== filename) {
+            return movieClean
+        }
+
+        // Return original filename if no pattern matched
+        return filename
+    }
+
+    /**
      * Get a friendly display name for a video
+     * Finds which configured path contains this file and returns that folder name
      */
     getVideoDisplayName(filePath) {
         const manifest = this.loadManifest()
         const videoHash = this.getVideoHash(filePath)
 
-        if (manifest[videoHash]) {
-            return manifest[videoHash].filename
+        // Get the original path from manifest, or use the provided path
+        let originalPath = filePath
+        if (manifest[videoHash] && manifest[videoHash].originalPath) {
+            originalPath = manifest[videoHash].originalPath
         }
 
-        // Fallback to parsing the filename
-        return path.basename(filePath, path.extname(filePath))
+        // Find which configured path contains this file
+        if (this.channel.paths) {
+            for (const configuredPath of this.channel.paths) {
+                if (originalPath.startsWith(configuredPath)) {
+                    // Return the basename of the configured path (show/movie name)
+                    return path.basename(configuredPath)
+                }
+            }
+        }
+
+        // Fallback: return parent folder name
+        return path.basename(path.dirname(originalPath))
     }
 
     /**
-     * Get schedule for the TV guide - shows what's playing when
+     * Get schedule for the TV guide - shows from previous 3am to next 3am
+     * Playback is continuous and never resets at 3am boundaries
      */
-    getSchedule(hoursAhead = 24) {
+    getSchedule() {
         const allSegments = this.generateMasterPlaylist()
         if (allSegments.length === 0) return []
 
-        const manifest = this.loadManifest()
         const totalDuration = allSegments[allSegments.length - 1].timestamp
-        const currentOffset = this.getCurrentOffset()
-        const normalizedOffset = currentOffset % totalDuration
 
-        // Build a list of videos with their start times
+        // Build a list of videos with their start times (relative to loop start)
         const videos = []
         let lastVideoIndex = -1
         let videoStartTime = 0
@@ -267,7 +318,7 @@ class PlaylistManager {
             if (segment.videoIndex !== lastVideoIndex) {
                 const filePath = this.channel.queue[segment.videoIndex]
                 const videoHash = this.getVideoHash(filePath)
-                const displayName = manifest[videoHash]?.filename || path.basename(filePath, path.extname(filePath))
+                const displayName = this.getVideoDisplayName(filePath)
 
                 videos.push({
                     videoIndex: segment.videoIndex,
@@ -285,77 +336,106 @@ class PlaylistManager {
             videoStartTime = segment.timestamp
         })
 
-        // Find current video and calculate actual times
         const now = Date.now()
-        const schedule = []
+        const dayStart = this.getPrevious3am()
+        const dayEnd = this.getNext3am()
 
-        // Calculate how far into the loop we are
+        // Use actual playback offset (same calculation as createRollingPlaylist)
+        const currentOffset = this.getCurrentOffset()
+        const normalizedOffset = currentOffset % totalDuration
+
+        // Calculate the loop start time (when the current loop began)
         const loopStartTime = now - (normalizedOffset * 1000)
 
-        videos.forEach(video => {
-            const videoStartMs = loopStartTime + (video.startTime * 1000)
-            const videoEndMs = videoStartMs + (video.duration * 1000)
+        // Work backwards to find the loop that covers dayStart
+        const loopDuration = totalDuration * 1000
+        let scheduleLoopStart = loopStartTime
 
-            // Include videos that end after now and start before our window
-            const windowEnd = now + (hoursAhead * 60 * 60 * 1000)
-
-            if (videoEndMs > now && videoStartMs < windowEnd) {
-                schedule.push({
-                    title: video.displayName,
-                    startTime: videoStartMs,
-                    endTime: videoEndMs,
-                    duration: video.duration,
-                    isCurrent: videoStartMs <= now && videoEndMs > now
-                })
-            }
-        })
-
-        // If we need more items (loop wraps), add from beginning
-        if (schedule.length < 10 && videos.length > 0) {
-            const loopDuration = totalDuration * 1000
-            let nextLoopStart = loopStartTime + loopDuration
-
-            for (let loop = 0; loop < 3 && schedule.length < 20; loop++) {
-                videos.forEach(video => {
-                    const videoStartMs = nextLoopStart + (video.startTime * 1000)
-                    const videoEndMs = videoStartMs + (video.duration * 1000)
-                    const windowEnd = now + (hoursAhead * 60 * 60 * 1000)
-
-                    if (videoStartMs < windowEnd) {
-                        schedule.push({
-                            title: video.displayName,
-                            startTime: videoStartMs,
-                            endTime: videoEndMs,
-                            duration: video.duration,
-                            isCurrent: false
-                        })
-                    }
-                })
-                nextLoopStart += loopDuration
-            }
+        while (scheduleLoopStart > dayStart) {
+            scheduleLoopStart -= loopDuration
         }
+
+        const schedule = []
+
+        // Generate schedule from dayStart to dayEnd
+        // May need multiple loops if playlist is shorter than 24 hours
+        let currentLoopStart = scheduleLoopStart
+
+        while (currentLoopStart < dayEnd) {
+            videos.forEach(video => {
+                const videoStartMs = currentLoopStart + (video.startTime * 1000)
+                const videoEndMs = videoStartMs + (video.duration * 1000)
+
+                // Include videos that overlap with our display window
+                if (videoEndMs > dayStart && videoStartMs < dayEnd) {
+                    schedule.push({
+                        title: video.displayName,
+                        startTime: videoStartMs,
+                        endTime: videoEndMs,
+                        duration: video.duration,
+                        isCurrent: videoStartMs <= now && videoEndMs > now
+                    })
+                }
+            })
+            currentLoopStart += loopDuration
+        }
+
+        // Sort by start time
+        schedule.sort((a, b) => a.startTime - b.startTime)
 
         return schedule
     }
 
     /**
-     * Get midnight of the current day (used to anchor schedule)
+     * Get the day start for TV guide display (previous 3am)
      */
-    getMidnightToday() {
+    getDayStart() {
+        return this.getPrevious3am()
+    }
+
+    /**
+     * Get the next 3am boundary (for schedule end)
+     */
+    getNext3am() {
         const now = new Date()
-        now.setHours(0, 0, 0, 0)
-        return now.getTime()
+        const next3am = new Date(now)
+        next3am.setHours(3, 0, 0, 0)
+
+        // If it's past 3am today, get tomorrow's 3am
+        if (now.getHours() >= 3) {
+            next3am.setDate(next3am.getDate() + 1)
+        }
+
+        return next3am.getTime()
+    }
+
+    /**
+     * Get the previous 3am boundary (for schedule start display)
+     */
+    getPrevious3am() {
+        const now = new Date()
+        const prev3am = new Date(now)
+        prev3am.setHours(3, 0, 0, 0)
+
+        // If it's before 3am, get yesterday's 3am
+        if (now.getHours() < 3) {
+            prev3am.setDate(prev3am.getDate() - 1)
+        }
+
+        return prev3am.getTime()
     }
 
     /**
      * Start the playlist manager
-     * Anchors schedule to midnight so it's consistent throughout the day
+     * Uses actual start time for continuous playback
      */
     start() {
-        // Anchor to midnight so schedule is consistent all day
-        this.startTime = this.getMidnightToday()
+        // Use actual start time - playback is continuous, never resets
+        if (!this.startTime) {
+            this.startTime = Date.now()
+        }
         this.updateManifest()
-        Log(tag, 'Playlist manager started (anchored to midnight)', this.channel)
+        Log(tag, 'Playlist manager started', this.channel)
     }
 
     /**
