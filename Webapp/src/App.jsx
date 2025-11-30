@@ -113,12 +113,17 @@ function App() {
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: false,
-          backBufferLength: 90,
           liveDurationInfinity: true,
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
-          maxBufferSize: 60 * 1000 * 1000,
-          maxBufferHole: 0.5
+          // Buffer 120 seconds ahead
+          maxBufferLength: 120,
+          maxMaxBufferLength: 180,
+          maxBufferSize: 200 * 1000 * 1000,
+          maxBufferHole: 0.5,
+          // Don't cache played segments
+          backBufferLength: 0,
+          // Play behind live edge to ensure buffer ahead
+          liveSyncDurationCount: 6,
+          liveMaxLatencyDurationCount: 12
         })
 
         hls.loadSource(playlistUrl)
@@ -148,7 +153,24 @@ function App() {
           }
         })
 
+        // Handle buffer stalls - keep trying to load more content
+        hls.on(Hls.Events.BUFFER_EOS, () => {
+          console.log('Buffer reached end of stream, reloading...')
+          hls.startLoad()
+        })
+
         hlsRef.current = hls
+
+        // Recovery handlers for playback issues
+        const video = videoRef.current
+        const handleEnded = () => {
+          // Live streams shouldn't end - force reload if this happens
+          console.log('Video ended unexpectedly, restarting stream...')
+          hls.startLoad()
+          video.play().catch(() => {})
+        }
+
+        video.addEventListener('ended', handleEnded)
       } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
         videoRef.current.src = playlistUrl
         videoRef.current.play().catch(err => console.log('Autoplay blocked:', err))

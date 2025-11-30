@@ -129,22 +129,50 @@ class PlaylistManager {
             }
         }
 
-        // Include 30 seconds behind and 60 seconds ahead, wrapping around for loop
+        // Include segments behind current position
         const windowBehind = 30
-        const windowAhead = 60
         const totalSegments = allSegments.length
 
         let segmentsInWindow = []
 
-        // Gather segments, wrapping around if needed
-        for (let i = -windowBehind; i < windowAhead; i++) {
-            const idx = currentIndex + i
-            if (idx >= 0 && idx < totalSegments) {
+        // Add segments behind current position
+        for (let i = windowBehind; i > 0; i--) {
+            const idx = currentIndex - i
+            if (idx >= 0) {
                 segmentsInWindow.push(allSegments[idx])
-            } else if (idx >= totalSegments) {
-                // Wrap around to beginning for continuous loop
-                const wrappedIdx = idx % totalSegments
-                segmentsInWindow.push(allSegments[wrappedIdx])
+            }
+        }
+
+        // Find current video index
+        const currentVideoIndex = allSegments[currentIndex].videoIndex
+
+        // Add all remaining segments from current video + at least 2 more complete videos
+        // This ensures smooth transitions - player always has future content buffered
+        let videosIncluded = 0
+        let lastVideoSeen = currentVideoIndex
+
+        for (let i = currentIndex; i < totalSegments && videosIncluded < 3; i++) {
+            segmentsInWindow.push(allSegments[i])
+            if (allSegments[i].videoIndex !== lastVideoSeen) {
+                videosIncluded++
+                lastVideoSeen = allSegments[i].videoIndex
+            }
+        }
+
+        // If we hit the end, wrap around to include more videos
+        if (videosIncluded < 3) {
+            for (let i = 0; i < totalSegments && videosIncluded < 3; i++) {
+                const segment = allSegments[i]
+                // Don't duplicate segments we already added
+                if (segment.videoIndex <= currentVideoIndex) {
+                    segmentsInWindow.push(segment)
+                    if (segment.videoIndex !== lastVideoSeen) {
+                        videosIncluded++
+                        lastVideoSeen = segment.videoIndex
+                    }
+                } else {
+                    break
+                }
             }
         }
 
@@ -152,14 +180,23 @@ class PlaylistManager {
         const loopCount = Math.floor(offsetSeconds / totalDuration)
         const mediaSequence = loopCount * totalSegments + Math.max(0, currentIndex - windowBehind)
 
+        // Find max segment duration for TARGETDURATION (HLS spec requires it >= max segment)
+        const maxDuration = Math.ceil(Math.max(...segmentsInWindow.map(s => s.duration), 2))
+
         // Build playlist for live streaming (no ENDLIST tag)
         let playlist = '#EXTM3U\n'
         playlist += '#EXT-X-VERSION:3\n'
-        playlist += '#EXT-X-TARGETDURATION:2\n'
+        playlist += `#EXT-X-TARGETDURATION:${maxDuration}\n`
         playlist += `#EXT-X-MEDIA-SEQUENCE:${mediaSequence}\n`
 
-        // Add segments in window
+        // Add segments in window, with discontinuity tags at video transitions
+        let lastVideoIndex = null
         segmentsInWindow.forEach(segment => {
+            // Add discontinuity tag when transitioning to a different video
+            if (lastVideoIndex !== null && segment.videoIndex !== lastVideoIndex) {
+                playlist += '#EXT-X-DISCONTINUITY\n'
+            }
+            lastVideoIndex = segment.videoIndex
             playlist += `#EXTINF:${segment.duration.toFixed(6)},\n`
             playlist += `${segment.path}\n`
         })
