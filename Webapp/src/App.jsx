@@ -114,7 +114,11 @@ function App() {
           enableWorker: true,
           lowLatencyMode: false,
           backBufferLength: 90,
-          liveDurationInfinity: true
+          liveDurationInfinity: true,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          maxBufferSize: 60 * 1000 * 1000,
+          maxBufferHole: 0.5
         })
 
         hls.loadSource(playlistUrl)
@@ -193,7 +197,11 @@ function App() {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 90
+        backBufferLength: 90,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        maxBufferSize: 60 * 1000 * 1000,
+        maxBufferHole: 0.5
       })
 
       hls.loadSource(playlistUrl)
