@@ -48,6 +48,10 @@ video {
   display: block;
 }
 
+video.static-video {
+  object-fit: fill;
+}
+
 /* Hide PIP button */
 video::-webkit-media-controls-picture-in-picture-button {
   display: none !important;

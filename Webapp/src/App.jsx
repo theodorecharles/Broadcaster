@@ -454,6 +454,7 @@ function App() {
             playsInline
             webkit-playsinline="true"
             onClick={() => videoRef.current.muted = false}
+            className={currentChannelIndex === -1 ? 'static-video' : ''}
             style={{ display: showStatic ? 'none' : 'block' }}
           />
           <img
