@@ -57,3 +57,7 @@ ecosystem.config.js
 
 # Claude
 .claude
+
+# Source video files for static streams (keep in git, exclude from Docker)
+Webapp/combined_16x9.ts
+Webapp/combined_4x3.ts
