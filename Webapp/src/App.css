@@ -430,3 +430,214 @@ video::-webkit-media-controls-picture-in-picture-button {
   transform: none !important;
   box-shadow: none !important;
 }
+
+/* TV Guide Overlay */
+.tv-guide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.95);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Courier New', monospace;
+}
+
+.guide-header {
+  display: flex;
+  align-items: center;
+  padding: 15px 20px;
+  background: linear-gradient(to bottom, #1a1a1a, #0a0a0a);
+  border-bottom: 2px solid #0f0;
+  gap: 20px;
+}
+
+.guide-header h2 {
+  color: #0f0;
+  text-shadow: 0 0 10px #0f0;
+  font-size: 24px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.guide-time-now {
+  color: #0f0;
+  text-shadow: 0 0 5px #0f0;
+  font-size: 18px;
+  margin-left: auto;
+}
+
+.guide-close {
+  background: transparent;
+  border: 2px solid #0f0;
+  color: #0f0;
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.guide-close:hover {
+  background: #0f0;
+  color: #000;
+}
+
+.guide-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.guide-channel-row {
+  display: flex;
+  border-bottom: 1px solid #333;
+  min-height: 80px;
+}
+
+.guide-channel-name {
+  width: 120px;
+  min-width: 120px;
+  padding: 10px;
+  background: #1a1a1a;
+  color: #0f0;
+  text-shadow: 0 0 5px #0f0;
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  cursor: pointer;
+  border-right: 2px solid #333;
+  transition: all 0.2s;
+}
+
+.guide-channel-name:hover {
+  background: #2a2a2a;
+  border-right-color: #0f0;
+}
+
+.guide-channel-name.current {
+  background: #0f0;
+  color: #000;
+  text-shadow: none;
+}
+
+.guide-schedule {
+  display: flex;
+  overflow-x: auto;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #0f0 #111;
+}
+
+.guide-schedule::-webkit-scrollbar {
+  height: 8px;
+}
+
+.guide-schedule::-webkit-scrollbar-track {
+  background: #111;
+}
+
+.guide-schedule::-webkit-scrollbar-thumb {
+  background: #0f0;
+  border-radius: 4px;
+}
+
+.guide-show {
+  padding: 8px 12px;
+  border-right: 1px solid #333;
+  background: #111;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.guide-show:hover {
+  background: #222;
+}
+
+.guide-show.current {
+  background: #1a3a1a;
+  border-left: 3px solid #0f0;
+}
+
+.guide-show-time {
+  color: #0a0;
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+
+.guide-show-title {
+  color: #fff;
+  font-size: 12px;
+  font-weight: bold;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.guide-show-duration {
+  color: #666;
+  font-size: 10px;
+  margin-top: 4px;
+}
+
+/* Mobile adjustments for TV Guide */
+@media (max-width: 600px) {
+  .guide-header {
+    padding: 10px 15px;
+  }
+
+  .guide-header h2 {
+    font-size: 16px;
+  }
+
+  .guide-time-now {
+    font-size: 14px;
+  }
+
+  .guide-close {
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+  }
+
+  .guide-channel-name {
+    width: 80px;
+    min-width: 80px;
+    font-size: 10px;
+    padding: 8px;
+  }
+
+  .guide-channel-row {
+    min-height: 60px;
+  }
+
+  .guide-show {
+    padding: 6px 10px;
+  }
+
+  .guide-show-time {
+    font-size: 9px;
+  }
+
+  .guide-show-title {
+    font-size: 10px;
+    max-width: 120px;
+  }
+
+  .guide-show-duration {
+    font-size: 9px;
+  }
+}

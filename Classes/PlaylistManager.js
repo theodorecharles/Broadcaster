@@ -129,51 +129,22 @@ class PlaylistManager {
             }
         }
 
-        // Include segments behind current position
+        // Include segments behind and ahead of current position
+        // Use large windows to ensure smooth playback across video transitions
         const windowBehind = 30
+        const windowAhead = 2000  // ~30+ minutes at 1 sec/segment
         const totalSegments = allSegments.length
 
         let segmentsInWindow = []
 
-        // Add segments behind current position
-        for (let i = windowBehind; i > 0; i--) {
-            const idx = currentIndex - i
-            if (idx >= 0) {
-                segmentsInWindow.push(allSegments[idx])
+        // Gather segments with wrap-around support
+        for (let i = -windowBehind; i < windowAhead; i++) {
+            let idx = currentIndex + i
+            if (idx < 0) continue
+            if (idx >= totalSegments) {
+                idx = idx % totalSegments  // Wrap around for continuous loop
             }
-        }
-
-        // Find current video index
-        const currentVideoIndex = allSegments[currentIndex].videoIndex
-
-        // Add all remaining segments from current video + at least 2 more complete videos
-        // This ensures smooth transitions - player always has future content buffered
-        let videosIncluded = 0
-        let lastVideoSeen = currentVideoIndex
-
-        for (let i = currentIndex; i < totalSegments && videosIncluded < 3; i++) {
-            segmentsInWindow.push(allSegments[i])
-            if (allSegments[i].videoIndex !== lastVideoSeen) {
-                videosIncluded++
-                lastVideoSeen = allSegments[i].videoIndex
-            }
-        }
-
-        // If we hit the end, wrap around to include more videos
-        if (videosIncluded < 3) {
-            for (let i = 0; i < totalSegments && videosIncluded < 3; i++) {
-                const segment = allSegments[i]
-                // Don't duplicate segments we already added
-                if (segment.videoIndex <= currentVideoIndex) {
-                    segmentsInWindow.push(segment)
-                    if (segment.videoIndex !== lastVideoSeen) {
-                        videosIncluded++
-                        lastVideoSeen = segment.videoIndex
-                    }
-                } else {
-                    break
-                }
-            }
+            segmentsInWindow.push(allSegments[idx])
         }
 
         // Calculate sequence number - use loop count * totalSegments + position for monotonic increase
@@ -206,10 +177,173 @@ class PlaylistManager {
     }
 
     /**
+     * Get the manifest path for storing video metadata
+     */
+    getManifestPath() {
+        return path.join(CACHE_DIR, 'channels', this.channel.slug, 'manifest.json')
+    }
+
+    /**
+     * Load or create the video manifest with original filenames
+     */
+    loadManifest() {
+        const manifestPath = this.getManifestPath()
+        try {
+            if (fs.existsSync(manifestPath)) {
+                return JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+            }
+        } catch (err) {
+            Log(tag, `Error loading manifest: ${err.message}`, this.channel)
+        }
+        return {}
+    }
+
+    /**
+     * Save video metadata to manifest
+     */
+    saveManifest(manifest) {
+        const manifestPath = this.getManifestPath()
+        const dir = path.dirname(manifestPath)
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true })
+        }
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+    }
+
+    /**
+     * Update manifest with current queue's video metadata
+     */
+    updateManifest() {
+        const manifest = this.loadManifest()
+
+        this.channel.queue.forEach(filePath => {
+            const videoHash = this.getVideoHash(filePath)
+            if (!manifest[videoHash]) {
+                manifest[videoHash] = {
+                    originalPath: filePath,
+                    filename: path.basename(filePath, path.extname(filePath)),
+                    addedAt: Date.now()
+                }
+            }
+        })
+
+        this.saveManifest(manifest)
+        return manifest
+    }
+
+    /**
+     * Get a friendly display name for a video
+     */
+    getVideoDisplayName(filePath) {
+        const manifest = this.loadManifest()
+        const videoHash = this.getVideoHash(filePath)
+
+        if (manifest[videoHash]) {
+            return manifest[videoHash].filename
+        }
+
+        // Fallback to parsing the filename
+        return path.basename(filePath, path.extname(filePath))
+    }
+
+    /**
+     * Get schedule for the TV guide - shows what's playing when
+     */
+    getSchedule(hoursAhead = 24) {
+        const allSegments = this.generateMasterPlaylist()
+        if (allSegments.length === 0) return []
+
+        const manifest = this.loadManifest()
+        const totalDuration = allSegments[allSegments.length - 1].timestamp
+        const currentOffset = this.getCurrentOffset()
+        const normalizedOffset = currentOffset % totalDuration
+
+        // Build a list of videos with their start times
+        const videos = []
+        let lastVideoIndex = -1
+        let videoStartTime = 0
+
+        allSegments.forEach((segment, idx) => {
+            if (segment.videoIndex !== lastVideoIndex) {
+                const filePath = this.channel.queue[segment.videoIndex]
+                const videoHash = this.getVideoHash(filePath)
+                const displayName = manifest[videoHash]?.filename || path.basename(filePath, path.extname(filePath))
+
+                videos.push({
+                    videoIndex: segment.videoIndex,
+                    displayName: displayName,
+                    startTime: videoStartTime,
+                    duration: 0,
+                    hash: videoHash
+                })
+                lastVideoIndex = segment.videoIndex
+            }
+            // Track duration
+            if (videos.length > 0) {
+                videos[videos.length - 1].duration += segment.duration
+            }
+            videoStartTime = segment.timestamp
+        })
+
+        // Find current video and calculate actual times
+        const now = Date.now()
+        const schedule = []
+
+        // Calculate how far into the loop we are
+        const loopStartTime = now - (normalizedOffset * 1000)
+
+        videos.forEach(video => {
+            const videoStartMs = loopStartTime + (video.startTime * 1000)
+            const videoEndMs = videoStartMs + (video.duration * 1000)
+
+            // Include videos that end after now and start before our window
+            const windowEnd = now + (hoursAhead * 60 * 60 * 1000)
+
+            if (videoEndMs > now && videoStartMs < windowEnd) {
+                schedule.push({
+                    title: video.displayName,
+                    startTime: videoStartMs,
+                    endTime: videoEndMs,
+                    duration: video.duration,
+                    isCurrent: videoStartMs <= now && videoEndMs > now
+                })
+            }
+        })
+
+        // If we need more items (loop wraps), add from beginning
+        if (schedule.length < 10 && videos.length > 0) {
+            const loopDuration = totalDuration * 1000
+            let nextLoopStart = loopStartTime + loopDuration
+
+            for (let loop = 0; loop < 3 && schedule.length < 20; loop++) {
+                videos.forEach(video => {
+                    const videoStartMs = nextLoopStart + (video.startTime * 1000)
+                    const videoEndMs = videoStartMs + (video.duration * 1000)
+                    const windowEnd = now + (hoursAhead * 60 * 60 * 1000)
+
+                    if (videoStartMs < windowEnd) {
+                        schedule.push({
+                            title: video.displayName,
+                            startTime: videoStartMs,
+                            endTime: videoEndMs,
+                            duration: video.duration,
+                            isCurrent: false
+                        })
+                    }
+                })
+                nextLoopStart += loopDuration
+            }
+        }
+
+        return schedule
+    }
+
+    /**
      * Start the playlist manager
      */
     start() {
         this.startTime = Date.now()
+        this.updateManifest()  // Update manifest on start
         Log(tag, 'Playlist manager started', this.channel)
     }
 

@@ -123,9 +123,63 @@ class PreGenerator {
     }
 
     /**
+     * Get the manifest path for a channel
+     */
+    getManifestPath(channelSlug) {
+        return path.join(CACHE_DIR, 'channels', channelSlug, 'manifest.json')
+    }
+
+    /**
+     * Update the channel manifest with video metadata
+     */
+    updateChannelManifest(channel) {
+        const manifestPath = this.getManifestPath(channel.slug)
+        let manifest = {}
+
+        // Load existing manifest
+        try {
+            if (fs.existsSync(manifestPath)) {
+                manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+            }
+        } catch (err) {
+            Log(tag, `Error loading manifest: ${err.message}`, channel)
+        }
+
+        // Update with current queue
+        let added = 0
+        channel.queue.forEach(filePath => {
+            const videoHash = this.getVideoHash(filePath)
+            if (!manifest[videoHash]) {
+                manifest[videoHash] = {
+                    originalPath: filePath,
+                    filename: path.basename(filePath, path.extname(filePath)),
+                    addedAt: Date.now()
+                }
+                added++
+            }
+        })
+
+        // Save manifest
+        const dir = path.dirname(manifestPath)
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true })
+        }
+        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
+
+        if (added > 0) {
+            Log(tag, `Updated manifest with ${added} new videos`, channel)
+        }
+
+        return manifest
+    }
+
+    /**
      * Add a channel's videos to the generation queue
      */
     queueChannel(channel) {
+        // Update manifest first
+        this.updateChannelManifest(channel)
+
         const channelQueue = []
         let skippedCount = 0
 

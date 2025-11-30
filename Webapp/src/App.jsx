@@ -6,6 +6,7 @@ function App() {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
   const overlayTimeoutRef = useRef(null)
+  const guideRef = useRef(null)
 
   const [channels, setChannels] = useState([])
   const [currentChannelIndex, setCurrentChannelIndex] = useState(-1)
@@ -16,6 +17,8 @@ function App() {
   const [showVolumeOverlay, setShowVolumeOverlay] = useState(false)
   const [powerAnimation, setPowerAnimation] = useState(null)
   const [showMenu, setShowMenu] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
+  const [guideData, setGuideData] = useState({})
   const [aspectRatio, setAspectRatio] = useState(() => {
     return localStorage.getItem('tv-aspectRatio') || '16:9'
   })
@@ -300,6 +303,48 @@ function App() {
     }
   }
 
+  // TV Guide toggle
+  const toggleGuide = () => {
+    if (isPoweredOn) {
+      if (!showGuide) {
+        // Fetch guide data when opening
+        fetch('/api/guide?hours=12')
+          .then(res => res.json())
+          .then(data => {
+            setGuideData(data)
+            setShowGuide(true)
+          })
+          .catch(err => console.error('Failed to load guide:', err))
+      } else {
+        setShowGuide(false)
+      }
+    }
+  }
+
+  // Navigate to channel from guide
+  const selectChannelFromGuide = (slug) => {
+    const index = channels.findIndex(c => c.slug === slug)
+    if (index !== -1) {
+      setShowGuide(false)
+      changeChannel(index)
+    }
+  }
+
+  // Format time for guide display
+  const formatTime = (timestamp) => {
+    const date = new Date(timestamp)
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  }
+
+  // Format duration for guide display
+  const formatDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60)
+    if (mins < 60) return `${mins}m`
+    const hours = Math.floor(mins / 60)
+    const remainMins = mins % 60
+    return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
+  }
+
   // Handle fullscreen changes - prevent pause on iOS when exiting fullscreen
   useEffect(() => {
     const video = videoRef.current
@@ -373,15 +418,20 @@ function App() {
         case 'M':
           toggleMenu()
           break
+        case 'g':
+        case 'G':
+          toggleGuide()
+          break
         case 'Escape':
           setShowMenu(false)
+          setShowGuide(false)
           break
       }
     }
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isPoweredOn, channels, currentChannelIndex, currentVolume, showMenu])
+  }, [isPoweredOn, channels, currentChannelIndex, currentVolume, showMenu, showGuide])
 
   const currentChannel = channels[currentChannelIndex]
 
@@ -467,6 +517,43 @@ function App() {
             </div>
           )}
 
+          {showGuide && (
+            <div className="tv-guide">
+              <div className="guide-header">
+                <h2>TV GUIDE</h2>
+                <div className="guide-time-now">
+                  {new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                </div>
+                <button className="guide-close" onClick={() => setShowGuide(false)}>X</button>
+              </div>
+              <div className="guide-content" ref={guideRef}>
+                {Object.entries(guideData).map(([slug, channelData]) => (
+                  <div key={slug} className="guide-channel-row">
+                    <div
+                      className={`guide-channel-name ${channels[currentChannelIndex]?.slug === slug ? 'current' : ''}`}
+                      onClick={() => selectChannelFromGuide(slug)}
+                    >
+                      {channelData.name}
+                    </div>
+                    <div className="guide-schedule">
+                      {channelData.schedule.map((show, idx) => (
+                        <div
+                          key={idx}
+                          className={`guide-show ${show.isCurrent ? 'current' : ''}`}
+                          style={{ minWidth: Math.max(100, show.duration / 60 * 3) }}
+                        >
+                          <div className="guide-show-time">{formatTime(show.startTime)}</div>
+                          <div className="guide-show-title">{show.title}</div>
+                          <div className="guide-show-duration">{formatDuration(show.duration)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {scanlines && <div className="scanlines-overlay"></div>}
         </div>
       </div>
@@ -512,6 +599,12 @@ function App() {
         <button onClick={toggleMenu} title="Menu">
           <svg viewBox="0 0 24 24" width="24" height="24">
             <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" fill="currentColor"/>
+          </svg>
+        </button>
+        <button onClick={toggleGuide} title="TV Guide">
+          <svg viewBox="0 0 24 24" width="24" height="24">
+            <path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z" fill="currentColor"/>
+            <rect x="2" y="4" width="3" height="16" rx="1" fill="currentColor"/>
           </svg>
         </button>
       </div>
