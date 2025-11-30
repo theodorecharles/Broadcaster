@@ -44,6 +44,7 @@ COPY config.docker.txt ./config.txt
 COPY --from=frontend-builder /app/Webapp/dist ./Webapp/dist
 COPY Webapp/TelevisionUI.js ./Webapp/
 COPY Webapp/static ./Webapp/static
+COPY Webapp/static-4x3 ./Webapp/static-4x3
 COPY Webapp/static.gif ./Webapp/
 
 # Create broadcaster user with UID 99 (nobody) and GID 100 (users)
