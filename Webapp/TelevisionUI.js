@@ -162,6 +162,10 @@ class TelevisionUI {
 
     // TV Guide API - returns pre-cached guide instantly
     this.app.get(`/api/guide`, function(req,res){
+        // Prevent browser caching - guide changes on server restart
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate')
+        res.set('Pragma', 'no-cache')
+
         if (guideCache) {
             res.json(guideCache)
         } else {
