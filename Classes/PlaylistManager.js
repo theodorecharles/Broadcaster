@@ -74,6 +74,12 @@ class PlaylistManager {
 
             try {
                 const content = fs.readFileSync(playlistPath, 'utf8')
+
+                // Only include fully transcoded videos (must have ENDLIST marker)
+                if (!content.includes('#EXT-X-ENDLIST')) {
+                    return
+                }
+
                 const lines = content.split('\n')
 
                 for (let i = 0; i < lines.length; i++) {
