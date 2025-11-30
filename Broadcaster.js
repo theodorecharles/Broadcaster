@@ -148,13 +148,6 @@ async function startup() {
   // Start watching for channel config changes
   watchChannelsFile()
 
-  // Start broadcast (channels will show as available once they have content)
-  try {
-    ChannelPool().startBroadcast()
-  } catch (e) {
-    Log(tag, 'Unable to start the broadcast: ' + e)
-  }
-
   // Queue all channels for generation
   try {
     Log(tag, 'Checking for pre-generated HLS streams...')
@@ -163,13 +156,21 @@ async function startup() {
       PreGenerator.queueChannel(channel)
     })
 
-    // Generate any missing streams (runs in background, UI is already up)
+    // Wait for all streams to be generated before starting broadcast
     await PreGenerator.startGeneration()
 
     Log(tag, 'All HLS streams ready!')
 
   } catch (e) {
     Log(tag, 'Error during pre-generation: ' + e)
+  }
+
+  // Start broadcast AFTER all content is ready
+  try {
+    ChannelPool().startBroadcast()
+    Log(tag, 'Broadcast started - all channels now live!')
+  } catch (e) {
+    Log(tag, 'Unable to start the broadcast: ' + e)
   }
 }
 
