@@ -25,6 +25,7 @@ function App() {
     return localStorage.getItem('tv-scanlines') === 'on'
   })
   const [tvSize, setTvSize] = useState({ width: 0, height: 0 })
+  const [currentTime, setCurrentTime] = useState(new Date())
 
   // Calculate TV size based on window and aspect ratio
   useEffect(() => {
@@ -84,6 +85,15 @@ function App() {
       })
       .catch(err => console.error('Failed to load channels:', err))
   }, [])
+
+  // Update clock every second when guide is open
+  useEffect(() => {
+    if (!showGuide) return
+    const interval = setInterval(() => {
+      setCurrentTime(new Date())
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [showGuide])
 
   // Show overlay helper
   const showOverlay = (setter, duration = 2000) => {
@@ -543,7 +553,7 @@ function App() {
                   </div>
                 </div>
                 <div className="guide-time-now">
-                  {new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  {currentTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                 </div>
                 <button className="guide-close" onClick={() => setShowGuide(false)}>X</button>
               </div>

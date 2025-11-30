@@ -31,13 +31,19 @@ function regenerateGuideCache() {
 
     ChannelPool().queue.forEach(channel => {
         if (channel.started && channel.playlistManager) {
+            // Only include channels that have at least one transcoded video
+            const schedule = channel.playlistManager.getSchedule()
+            if (schedule.length === 0) {
+                return // Skip channels with no content
+            }
+
             if (!guide.dayStart) {
                 guide.dayStart = channel.playlistManager.getDayStart()
             }
             guide.channels[channel.slug] = {
                 name: channel.name,
                 slug: channel.slug,
-                schedule: channel.playlistManager.getSchedule()
+                schedule: schedule
             }
         }
     })
@@ -82,6 +88,7 @@ class TelevisionUI {
     this.app.use(compression())
 
     // Dynamic manifest - always reflects current channelPool state
+    // Only includes channels that have at least one transcoded video
     this.app.get(`/manifest.json`, function(req,res){
         var manifest = {
           channels: [],
@@ -89,11 +96,15 @@ class TelevisionUI {
         }
 
         ChannelPool().queue.forEach(channel => {
-          if (channel.started) {
-            manifest.channels.push({
-              name: channel.name,
-              slug: channel.slug
-            })
+          if (channel.started && channel.playlistManager) {
+            // Only include channels that have at least one transcoded video
+            const segments = channel.playlistManager.generateMasterPlaylist()
+            if (segments.length > 0) {
+              manifest.channels.push({
+                name: channel.name,
+                slug: channel.slug
+              })
+            }
           }
         })
         res.send(JSON.stringify(manifest))
