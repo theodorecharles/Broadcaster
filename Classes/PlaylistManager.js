@@ -339,12 +339,23 @@ class PlaylistManager {
     }
 
     /**
+     * Get midnight of the current day (used to anchor schedule)
+     */
+    getMidnightToday() {
+        const now = new Date()
+        now.setHours(0, 0, 0, 0)
+        return now.getTime()
+    }
+
+    /**
      * Start the playlist manager
+     * Anchors schedule to midnight so it's consistent throughout the day
      */
     start() {
-        this.startTime = Date.now()
-        this.updateManifest()  // Update manifest on start
-        Log(tag, 'Playlist manager started', this.channel)
+        // Anchor to midnight so schedule is consistent all day
+        this.startTime = this.getMidnightToday()
+        this.updateManifest()
+        Log(tag, 'Playlist manager started (anchored to midnight)', this.channel)
     }
 
     /**

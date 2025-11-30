@@ -345,6 +345,14 @@ function App() {
     return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
   }
 
+  // Sync vertical scroll between channel list and schedule
+  const channelsRef = useRef(null)
+  const handleScheduleScroll = (e) => {
+    if (channelsRef.current) {
+      channelsRef.current.scrollTop = e.target.scrollTop
+    }
+  }
+
   // Handle fullscreen changes - prevent pause on iOS when exiting fullscreen
   useEffect(() => {
     const video = videoRef.current
@@ -526,30 +534,37 @@ function App() {
                 </div>
                 <button className="guide-close" onClick={() => setShowGuide(false)}>X</button>
               </div>
-              <div className="guide-content" ref={guideRef}>
-                {Object.entries(guideData).map(([slug, channelData]) => (
-                  <div key={slug} className="guide-channel-row">
+              <div className="guide-body">
+                <div className="guide-channels" ref={channelsRef}>
+                  {Object.entries(guideData).map(([slug, channelData]) => (
                     <div
+                      key={slug}
                       className={`guide-channel-name ${channels[currentChannelIndex]?.slug === slug ? 'current' : ''}`}
                       onClick={() => selectChannelFromGuide(slug)}
                     >
                       {channelData.name}
                     </div>
-                    <div className="guide-schedule">
-                      {channelData.schedule.map((show, idx) => (
-                        <div
-                          key={idx}
-                          className={`guide-show ${show.isCurrent ? 'current' : ''}`}
-                          style={{ minWidth: Math.max(100, show.duration / 60 * 3) }}
-                        >
-                          <div className="guide-show-time">{formatTime(show.startTime)}</div>
-                          <div className="guide-show-title">{show.title}</div>
-                          <div className="guide-show-duration">{formatDuration(show.duration)}</div>
-                        </div>
-                      ))}
-                    </div>
+                  ))}
+                </div>
+                <div className="guide-schedule-container" ref={guideRef} onScroll={handleScheduleScroll}>
+                  <div className="guide-schedule-scroll">
+                    {Object.entries(guideData).map(([slug, channelData]) => (
+                      <div key={slug} className="guide-channel-row">
+                        {channelData.schedule.map((show, idx) => (
+                          <div
+                            key={idx}
+                            className={`guide-show ${show.isCurrent ? 'current' : ''}`}
+                            style={{ width: Math.max(120, show.duration / 60 * 4) }}
+                          >
+                            <div className="guide-show-time">{formatTime(show.startTime)}</div>
+                            <div className="guide-show-title">{show.title}</div>
+                            <div className="guide-show-duration">{formatDuration(show.duration)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
                   </div>
-                ))}
+                </div>
               </div>
             </div>
           )}
