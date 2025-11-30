@@ -312,7 +312,7 @@ function App() {
                 const now = Date.now()
                 const dayStart = data.dayStart
                 const msFromDayStart = now - dayStart
-                const pxPerMs = 24 / (60 * 1000) // 24px per minute = 24/60000 px per ms
+                const pxPerMs = 10 / (60 * 1000) // 10px per minute (30m = 300px)
                 const scrollX = msFromDayStart * pxPerMs - 200 // Offset to show some past content
                 guideRef.current.scrollLeft = Math.max(0, scrollX)
               }
@@ -354,6 +354,11 @@ function App() {
   const handleScheduleScroll = (e) => {
     if (channelsRef.current) {
       channelsRef.current.scrollTop = e.target.scrollTop
+    }
+  }
+  const handleChannelsScroll = (e) => {
+    if (guideRef.current) {
+      guideRef.current.scrollTop = e.target.scrollTop
     }
   }
 
@@ -528,23 +533,26 @@ function App() {
                 <button className="guide-close" onClick={() => setShowGuide(false)}>X</button>
               </div>
               <div className="guide-body">
-                <div className="guide-channels" ref={channelsRef}>
-                  {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => (
-                    <div
-                      key={slug}
-                      className={`guide-channel-name ${channels[currentChannelIndex]?.slug === slug ? 'current' : ''}`}
-                      onClick={() => selectChannelFromGuide(slug)}
-                    >
-                      {channelData.name}
-                    </div>
-                  ))}
+                <div className="guide-channels" ref={channelsRef} onScroll={handleChannelsScroll}>
+                  {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => {
+                    const channelNum = channels.findIndex(c => c.slug === slug) + 1
+                    return (
+                      <div
+                        key={slug}
+                        className={`guide-channel-name ${channels[currentChannelIndex]?.slug === slug ? 'current' : ''}`}
+                        onClick={() => selectChannelFromGuide(slug)}
+                      >
+                        {channelNum}. {channelData.name}
+                      </div>
+                    )
+                  })}
                 </div>
                 <div className="guide-schedule-container" ref={guideRef} onScroll={handleScheduleScroll}>
                   {/* Current time indicator line */}
                   {guideData.dayStart && (
                     <div
                       className="guide-now-line"
-                      style={{ left: (Date.now() - guideData.dayStart) / (60 * 1000) * 24 }}
+                      style={{ left: (Date.now() - guideData.dayStart) / (60 * 1000) * 10 }}
                     />
                   )}
                   <div className="guide-schedule-scroll">
@@ -555,8 +563,8 @@ function App() {
                             key={idx}
                             className={`guide-show ${show.isCurrent ? 'current' : ''}`}
                             style={{
-                              width: Math.max(200, show.duration / 60 * 24),
-                              marginLeft: idx === 0 ? (show.startTime - guideData.dayStart) / (60 * 1000) * 24 : 0
+                              width: show.duration / 60 * 10,
+                              left: (show.startTime - guideData.dayStart) / (60 * 1000) * 10
                             }}
                           >
                             <div className="guide-show-time">{formatTime(show.startTime)}</div>

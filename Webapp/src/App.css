@@ -625,21 +625,24 @@ video::-webkit-media-controls-picture-in-picture-button {
 }
 
 .guide-channel-row {
-  display: flex;
+  position: relative;
   height: 90px;
   border-bottom: 1px solid #333;
   flex-shrink: 0;
+  /* 24 hours at 10px per minute (30m = 300px) */
+  min-width: 14400px;
 }
 
 .guide-show {
+  position: absolute;
+  top: 0;
   height: 90px;
   padding: 10px 12px;
   border-right: 1px solid #444;
-  background: #111;
+  background: #11111191;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  flex-shrink: 0;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -665,7 +668,9 @@ video::-webkit-media-controls-picture-in-picture-button {
   font-size: 18px;
   font-weight: bold;
   line-height: 1.4;
-  word-wrap: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .guide-show-duration {
@@ -711,6 +716,7 @@ video::-webkit-media-controls-picture-in-picture-button {
   }
 
   .guide-show {
+    top: 0;
     height: 70px;
     padding: 6px 10px;
   }
