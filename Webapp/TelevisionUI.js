@@ -124,6 +124,21 @@ class TelevisionUI {
         const currentSegment = allSegments[currentSegmentIndex]
         const currentVideoPath = currentSegment ? channel.queue[currentSegment.videoIndex] : null
         const currentVideoName = currentVideoPath ? channel.playlistManager.getVideoDisplayName(currentVideoPath) : null
+        const currentVideoHash = currentVideoPath ? channel.playlistManager.getVideoHash(currentVideoPath) : null
+
+        // Try to read the metadata.json for the current video to see what was actually transcoded
+        let transcodedFromPath = null
+        if (currentVideoHash) {
+            try {
+                const metadataPath = path.join(CACHE_DIR, 'channels', slug, 'videos', currentVideoHash, 'metadata.json')
+                if (fs.existsSync(metadataPath)) {
+                    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'))
+                    transcodedFromPath = metadata.originalPath
+                }
+            } catch (e) {
+                transcodedFromPath = 'Error reading metadata: ' + e.message
+            }
+        }
 
         // Get schedule's "current" show
         const schedule = channel.playlistManager.getSchedule()
@@ -144,13 +159,16 @@ class TelevisionUI {
                 segmentIndex: currentSegmentIndex,
                 videoIndex: currentSegment?.videoIndex,
                 videoName: currentVideoName,
-                videoPath: currentVideoPath
+                videoPath: currentVideoPath,
+                videoHash: currentVideoHash,
+                transcodedFromPath: transcodedFromPath
             },
             scheduleSays: currentShow ? {
                 title: currentShow.title,
                 startTime: new Date(currentShow.startTime).toISOString(),
                 endTime: new Date(currentShow.endTime).toISOString()
-            } : null
+            } : null,
+            pathMismatch: transcodedFromPath && currentVideoPath && transcodedFromPath !== currentVideoPath
         })
     })
 
