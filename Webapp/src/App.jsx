@@ -55,6 +55,7 @@ function App() {
   })
   const [tvSize, setTvSize] = useState({ width: 0, height: 0 })
   const [currentTime, setCurrentTime] = useState(new Date())
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 600)
 
   // Calculate TV size based on window and aspect ratio
   useEffect(() => {
@@ -84,6 +85,7 @@ function App() {
       }
 
       setTvSize({ width: Math.floor(width), height: Math.floor(height) })
+      setIsMobile(window.innerWidth <= 600)
     }
 
     calculateSize()
@@ -366,8 +368,10 @@ function App() {
                 const now = Date.now()
                 const dayStart = data.dayStart
                 const msFromDayStart = now - dayStart
-                const pxPerMs = 10 / (60 * 1000) // 10px per minute (30m = 300px)
-                const scrollX = msFromDayStart * pxPerMs - 200 // Offset to show some past content
+                const mobile = window.innerWidth <= 600
+                const pxPerMin = mobile ? 5 : 10
+                const pxPerMs = pxPerMin / (60 * 1000)
+                const scrollX = msFromDayStart * pxPerMs - (mobile ? 100 : 200) // Offset to show some past content
                 guideRef.current.scrollLeft = Math.max(0, scrollX)
 
                 // Scroll current channel into view
@@ -615,10 +619,12 @@ function App() {
                     {guideData.dayStart && (
                       <div
                         className="guide-now-line"
-                        style={{ left: (Date.now() - guideData.dayStart) / (60 * 1000) * 10 }}
+                        style={{ left: (Date.now() - guideData.dayStart) / (60 * 1000) * (isMobile ? 5 : 10) }}
                       />
                     )}
-                    {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => (
+                    {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => {
+                      const pxPerMin = isMobile ? 5 : 10 // 50% scale on mobile
+                      return (
                       <div key={slug} className="guide-channel-row">
                         {channelData.schedule.map((show, idx) => {
                           const now = Date.now()
@@ -628,8 +634,8 @@ function App() {
                             key={idx}
                             className={`guide-show ${isCurrent ? 'current' : ''}`}
                             style={{
-                              width: show.duration / 60 * 10,
-                              left: (show.startTime - guideData.dayStart) / (60 * 1000) * 10
+                              width: show.duration / 60 * pxPerMin,
+                              left: (show.startTime - guideData.dayStart) / (60 * 1000) * pxPerMin
                             }}
                           >
                             <div className="guide-show-time">{formatTime(show.startTime)}</div>
@@ -638,7 +644,7 @@ function App() {
                           </div>
                         )})}
                       </div>
-                    ))}
+                    )})}
                   </div>
                 </div>
               </div>

@@ -550,6 +550,7 @@ video::-webkit-media-controls-picture-in-picture-button {
   overflow-y: auto;
   background: #1a1a1a;
   border-right: 2px solid #333;
+  -webkit-overflow-scrolling: touch;
 }
 
 .guide-channel-name {
@@ -586,6 +587,7 @@ video::-webkit-media-controls-picture-in-picture-button {
   scrollbar-width: thin;
   scrollbar-color: #0f0 #111;
   position: relative;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Current time indicator line */
@@ -705,50 +707,53 @@ video::-webkit-media-controls-picture-in-picture-button {
 /* Mobile adjustments for TV Guide */
 @media (max-width: 600px) {
   .guide-header {
-    padding: 10px 15px;
+    padding: 6px 10px;
   }
 
   .guide-header h2 {
-    font-size: 16px;
+    font-size: 12px;
   }
 
   .guide-time-now {
-    font-size: 14px;
+    font-size: 11px;
   }
 
   .guide-close {
-    width: 28px;
-    height: 28px;
-    font-size: 14px;
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
   }
 
   .guide-channels {
-    width: 80px;
-    min-width: 80px;
+    width: 60px;
+    min-width: 60px;
   }
 
   .guide-channel-name {
-    height: 70px;
-    font-size: 9px;
-    padding: 6px;
+    height: 45px;
+    font-size: 8px;
+    padding: 4px;
   }
 
   .guide-channel-row {
-    height: 70px;
+    height: 45px;
+    min-width: 7200px; /* Half of 14400px for 50% scale */
   }
 
   .guide-show {
     top: 0;
-    height: 70px;
-    padding: 6px 10px;
+    height: 45px;
+    padding: 4px 6px;
   }
 
   .guide-show-time {
-    font-size: 9px;
+    font-size: 7px;
+    margin-bottom: 2px;
   }
 
   .guide-show-title {
-    font-size: 9px;
+    font-size: 8px;
+    line-height: 1.2;
   }
 
   .guide-show-title span.marquee {
@@ -756,6 +761,6 @@ video::-webkit-media-controls-picture-in-picture-button {
   }
 
   .guide-show-duration {
-    font-size: 8px;
+    display: none; /* Hide duration on mobile to save space */
   }
 }
