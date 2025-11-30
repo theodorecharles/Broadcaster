@@ -356,6 +356,11 @@ function App() {
       channelsRef.current.scrollTop = e.target.scrollTop
     }
   }
+  const handleChannelsScroll = (e) => {
+    if (guideRef.current) {
+      guideRef.current.scrollTop = e.target.scrollTop
+    }
+  }
 
   // Handle fullscreen changes - prevent pause on iOS when exiting fullscreen
   useEffect(() => {
@@ -528,7 +533,7 @@ function App() {
                 <button className="guide-close" onClick={() => setShowGuide(false)}>X</button>
               </div>
               <div className="guide-body">
-                <div className="guide-channels" ref={channelsRef}>
+                <div className="guide-channels" ref={channelsRef} onScroll={handleChannelsScroll}>
                   {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => {
                     const channelNum = channels.findIndex(c => c.slug === slug) + 1
                     return (
