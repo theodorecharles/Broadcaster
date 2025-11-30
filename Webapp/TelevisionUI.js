@@ -18,6 +18,11 @@ const ChannelPool = require('../Utilities/ChannelPool.js')
 
 var ui = null
 
+// Guide cache - regenerate every 60 seconds
+let guideCache = null
+let guideCacheTime = 0
+const GUIDE_CACHE_TTL = 60 * 1000
+
 class TelevisionUI {
 
   constructor(app,port) {
@@ -92,7 +97,17 @@ class TelevisionUI {
     })
 
     // TV Guide API - returns full day schedule for all channels (3am to 3am)
+    // Cached for performance since generateMasterPlaylist reads many files
     this.app.get(`/api/guide`, function(req,res){
+        const now = Date.now()
+
+        // Return cached guide if still fresh
+        if (guideCache && (now - guideCacheTime) < GUIDE_CACHE_TTL) {
+            res.json(guideCache)
+            return
+        }
+
+        // Generate fresh guide data
         const guide = {
             dayStart: null,
             channels: {}
@@ -110,6 +125,10 @@ class TelevisionUI {
                 }
             }
         })
+
+        // Update cache
+        guideCache = guide
+        guideCacheTime = now
 
         res.json(guide)
     })
