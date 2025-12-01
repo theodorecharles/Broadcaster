@@ -141,6 +141,7 @@ class PreGenerator {
 
     /**
      * Update the channel manifest with video metadata
+     * Also cleans up removed videos from manifest and deletes their HLS folders
      */
     updateChannelManifest(channel) {
         const manifestPath = this.getManifestPath(channel.slug)
@@ -155,7 +156,37 @@ class PreGenerator {
             Log(tag, `Error loading manifest: ${err.message}`, channel)
         }
 
-        // Update with current queue
+        // Build set of current video hashes from queue
+        const currentHashes = new Set()
+        channel.queue.forEach(filePath => {
+            currentHashes.add(this.getVideoHash(filePath))
+        })
+
+        // Find and remove videos that are no longer in the queue
+        let removed = 0
+        const videosDir = path.join(CACHE_DIR, 'channels', channel.slug, 'videos')
+        for (const hash of Object.keys(manifest)) {
+            if (!currentHashes.has(hash)) {
+                const videoDir = path.join(videosDir, hash)
+                const filename = manifest[hash].filename || hash
+
+                // Delete the HLS folder
+                if (fs.existsSync(videoDir)) {
+                    try {
+                        fs.rmSync(videoDir, { recursive: true })
+                        Log(tag, `Deleted HLS folder for removed video: ${filename}`, channel)
+                    } catch (err) {
+                        Log(tag, `Failed to delete HLS folder for ${filename}: ${err.message}`, channel)
+                    }
+                }
+
+                // Remove from manifest
+                delete manifest[hash]
+                removed++
+            }
+        }
+
+        // Add new videos to manifest
         let added = 0
         channel.queue.forEach(filePath => {
             const videoHash = this.getVideoHash(filePath)
@@ -169,6 +200,28 @@ class PreGenerator {
             }
         })
 
+        // Clean up orphaned HLS folders (exist on disk but not in manifest or queue)
+        let orphansDeleted = 0
+        if (fs.existsSync(videosDir)) {
+            try {
+                const existingFolders = fs.readdirSync(videosDir)
+                for (const folder of existingFolders) {
+                    if (!currentHashes.has(folder)) {
+                        const orphanDir = path.join(videosDir, folder)
+                        try {
+                            fs.rmSync(orphanDir, { recursive: true })
+                            Log(tag, `Deleted orphaned HLS folder: ${folder}`, channel)
+                            orphansDeleted++
+                        } catch (err) {
+                            Log(tag, `Failed to delete orphaned folder ${folder}: ${err.message}`, channel)
+                        }
+                    }
+                }
+            } catch (err) {
+                Log(tag, `Error scanning videos directory: ${err.message}`, channel)
+            }
+        }
+
         // Save manifest
         const dir = path.dirname(manifestPath)
         if (!fs.existsSync(dir)) {
@@ -176,8 +229,8 @@ class PreGenerator {
         }
         fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
 
-        if (added > 0) {
-            Log(tag, `Updated manifest with ${added} new videos`, channel)
+        if (added > 0 || removed > 0 || orphansDeleted > 0) {
+            Log(tag, `Manifest updated: +${added} added, -${removed} removed, ${orphansDeleted} orphans deleted`, channel)
         }
 
         return manifest
