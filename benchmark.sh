@@ -21,9 +21,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Get timestamp in same format as docker logs
+timestamp() {
+    date -u +"%a, %d %b %Y %H:%M:%S GMT"
+}
+
 run_benchmark() {
 
 echo "Fetching manifest..."
+req_time=$(timestamp)
 manifest=$(curl -s -w "\n%{time_total}\n%{size_download}" "$BASE_URL/manifest.json")
 manifest_time=$(echo "$manifest" | tail -2 | head -1)
 manifest_size=$(echo "$manifest" | tail -1)
@@ -37,12 +43,13 @@ if [ -z "$manifest" ]; then
 fi
 
 echo ""
-printf "%-25s %10s %10s\n" "Endpoint" "Time (ms)" "Size (KB)"
-printf "%-25s %10s %10s\n" "--------" "---------" "---------"
-printf "%-25s %10s %10s\n" "manifest.json" "$manifest_time_ms" "$manifest_size_kb"
+printf "%-30s %-25s %10s %10s\n" "Timestamp" "Endpoint" "Time (ms)" "Size (KB)"
+printf "%-30s %-25s %10s %10s\n" "---------" "--------" "---------" "---------"
+printf "%-30s %-25s %10s %10s\n" "$req_time" "manifest.json" "$manifest_time_ms" "$manifest_size_kb"
 
 # Extract slugs and benchmark each
 echo "$manifest" | jq -r '.channels[].slug' | while read -r slug; do
+    req_time=$(timestamp)
     if [ "$EXTENDED" = true ]; then
         # Fetch playlist content along with timing
         playlist=$(curl -s -w "\n%{time_total} %{size_download}" "$BASE_URL/$slug.m3u8")
@@ -59,7 +66,7 @@ echo "$manifest" | jq -r '.channels[].slug' | while read -r slug; do
 
     time_ms=$(echo "$time_s * 1000" | bc | xargs printf "%.0f")
     size_kb=$(echo "scale=2; $size_bytes / 1024" | bc)
-    printf "%-25s %10s %10s\n" "$slug.m3u8" "$time_ms" "$size_kb"
+    printf "%-30s %-25s %10s %10s\n" "$req_time" "$slug.m3u8" "$time_ms" "$size_kb"
 
     if [ "$EXTENDED" = true ]; then
         # Get first segment URL (first non-comment line)
@@ -73,24 +80,20 @@ echo "$manifest" | jq -r '.channels[].slug' | while read -r slug; do
                 segment_url="$BASE_URL/$first_segment"
             fi
 
+            seg_req_time=$(timestamp)
             seg_result=$(curl -s -o /dev/null -w "%{time_total} %{size_download}" "$segment_url")
             seg_time_s=$(echo "$seg_result" | awk '{print $1}')
             seg_size_bytes=$(echo "$seg_result" | awk '{print $2}')
             seg_time_ms=$(echo "$seg_time_s * 1000" | bc | xargs printf "%.0f")
             seg_size_kb=$(echo "scale=2; $seg_size_bytes / 1024" | bc)
 
-            printf "  └─ %-20s %10s %10s\n" "segment" "$seg_time_ms" "$seg_size_kb"
+            printf "%-30s   └─ %-20s %10s %10s\n" "$seg_req_time" "segment" "$seg_time_ms" "$seg_size_kb"
         fi
     fi
 done
 
 echo ""
 echo "Benchmark complete."
-}
-
-# Get timestamp in same format as docker logs
-timestamp() {
-    date -u +"%a, %d %b %Y %H:%M:%S GMT"
 }
 
 # Main execution
