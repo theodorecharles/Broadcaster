@@ -186,6 +186,11 @@ function Channel(definition) {
     this.started = true
     this.startTime = Date.now()
     this.playlistManager.start()
+
+    // Pre-warm the playlist cache so first request is fast
+    this.playlistManager.cachedSegments = this.playlistManager.generateMasterPlaylist()
+    this.playlistManager.cacheTime = Date.now()
+
     Log(tag, 'Channel started', this)
   }
 
