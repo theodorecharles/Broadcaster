@@ -3,6 +3,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const Log = require('./Log.js')
+const Database = require('./Database.js')
 const { regenerateGuideCache } = require('../Webapp/TelevisionUI.js')
 const tag = 'PreGenerator'
 
@@ -72,15 +73,35 @@ class PreGenerator {
 
     /**
      * Check if HLS files already exist for this video and are complete
+     * OPTIMIZED: Check database first before filesystem
      */
     isAlreadyGenerated(filePath, channelSlug) {
         const videoHash = this.getVideoHash(filePath)
+        const fileName = path.basename(filePath)
+
+        // Fast check: query database first
+        const db = Database()
+        const video = db.getVideoByPath(channelSlug, filePath)
+
+        // If not in database or not marked as transcoded, it's not generated
+        if (!video || !video.transcoded) {
+            return false
+        }
+
+        // Database says it's transcoded, but verify files actually exist
         const outputDir = path.join(CACHE_DIR, 'channels', channelSlug, 'videos', videoHash)
         const playlistPath = path.join(outputDir, 'index.m3u8')
-        const fileName = path.basename(filePath)
 
         // Check if playlist exists
         if (!fs.existsSync(playlistPath)) {
+            // Database is out of sync - mark as not transcoded
+            Log(tag, `Database out of sync for ${fileName} - marking as not transcoded`)
+            try {
+                db.db.prepare('UPDATE videos SET transcoded = 0 WHERE hash = ?').run(videoHash)
+            } catch (e) {
+                Log(tag, `Failed to update database: ${e.message}`)
+            }
+
             // If directory exists but no playlist, it's incomplete - delete it
             if (fs.existsSync(outputDir)) {
                 this.deletePartialGeneration(outputDir, fileName)
@@ -96,6 +117,7 @@ class PreGenerator {
             // If we have a playlist but no segments, it's incomplete
             if (segmentFiles.length === 0) {
                 Log(tag, `Incomplete generation detected for ${fileName} - no segments found`)
+                db.db.prepare('UPDATE videos SET transcoded = 0 WHERE hash = ?').run(videoHash)
                 this.deletePartialGeneration(outputDir, fileName)
                 return false
             }
@@ -104,6 +126,7 @@ class PreGenerator {
             const playlistContent = fs.readFileSync(playlistPath, 'utf8')
             if (!playlistContent.includes('#EXT-X-ENDLIST')) {
                 Log(tag, `Incomplete generation detected for ${fileName} - playlist not finalized`)
+                db.db.prepare('UPDATE videos SET transcoded = 0 WHERE hash = ?').run(videoHash)
                 this.deletePartialGeneration(outputDir, fileName)
                 return false
             }
@@ -113,6 +136,7 @@ class PreGenerator {
             for (const segmentRef of segmentRefs) {
                 if (!fs.existsSync(path.join(outputDir, segmentRef))) {
                     Log(tag, `Incomplete generation detected for ${fileName} - missing segment ${segmentRef}`)
+                    db.db.prepare('UPDATE videos SET transcoded = 0 WHERE hash = ?').run(videoHash)
                     this.deletePartialGeneration(outputDir, fileName)
                     return false
                 }
@@ -122,6 +146,7 @@ class PreGenerator {
             const metadataPath = path.join(outputDir, 'metadata.json')
             if (!fs.existsSync(metadataPath)) {
                 Log(tag, `Incomplete generation detected for ${fileName} - missing metadata.json`)
+                db.db.prepare('UPDATE videos SET transcoded = 0 WHERE hash = ?').run(videoHash)
                 this.deletePartialGeneration(outputDir, fileName)
                 return false
             }
@@ -416,6 +441,20 @@ class PreGenerator {
                     const duration = (Date.now() - startTime) / 1000
                     Log(tag, `Generated ${path.basename(filePath)} in ${duration.toFixed(1)}s [${this.currentIndex}/${this.totalVideos}]`, channel)
 
+                    // Get video duration from the generated playlist
+                    let videoDuration = 0
+                    try {
+                        const playlistContent = fs.readFileSync(outputPath, 'utf8')
+                        playlistContent.split('\n').forEach(line => {
+                            if (line.startsWith('#EXTINF:')) {
+                                const match = line.match(/#EXTINF:([\d.]+)/)
+                                if (match) videoDuration += parseFloat(match[1])
+                            }
+                        })
+                    } catch (e) {
+                        Log(tag, `Could not calculate video duration: ${e.message}`, channel)
+                    }
+
                     // Store metadata
                     const metadata = {
                         originalPath: filePath,
@@ -427,6 +466,21 @@ class PreGenerator {
                         path.join(outputDir, 'metadata.json'),
                         JSON.stringify(metadata, null, 2)
                     )
+
+                    // Update database with transcoding status
+                    try {
+                        const db = Database()
+                        db.markVideoTranscoded(
+                            videoHash,
+                            videoDuration,
+                            videoInfo.codec,
+                            videoInfo.audioCodec,
+                            parseInt(videoInfo.width) || null,
+                            parseInt(videoInfo.height) || null
+                        )
+                    } catch (dbErr) {
+                        Log(tag, `Database update error: ${dbErr.message}`, channel)
+                    }
 
                     // Refresh guide cache immediately so new content appears
                     regenerateGuideCache()

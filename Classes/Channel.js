@@ -1,6 +1,8 @@
 const Format = require('../Utilities/FormatValidator.js')
 const { PlaylistManager } = require('./PlaylistManager.js')
 const Log = require('../Utilities/Log.js')
+const Database = require('../Utilities/Database.js')
+const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
 const { CACHE_DIR } = process.env
@@ -51,6 +53,31 @@ function Channel(definition) {
     if (definition.type == 'shuffle') this.queue.sort(() => Math.random() - 0.5)
 
   })
+
+  // Register channel and videos in database
+  const db = Database()
+  const channelId = db.upsertChannel(this.slug, this.name, this.type)
+
+  // Add all videos to database
+  let addedCount = 0
+  this.queue.forEach(filePath => {
+    const hash = crypto.createHash('md5').update(filePath).digest('hex')
+    const filename = path.basename(filePath, path.extname(filePath))
+    const result = db.insertVideo(channelId, filePath, hash, filename)
+    if (result.changes > 0) {
+      addedCount++
+    }
+  })
+
+  // Clean up videos that are no longer in the queue
+  const deletedHashes = db.deleteRemovedVideos(this.slug, this.queue)
+  if (deletedHashes.length > 0) {
+    Log(tag, `Removed ${deletedHashes.length} videos from database that are no longer in queue`, this)
+  }
+
+  if (addedCount > 0) {
+    Log(tag, `Added ${addedCount} new videos to database`, this)
+  }
 
   // Initialize playlist manager
   this.playlistManager = new PlaylistManager(this)

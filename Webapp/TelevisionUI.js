@@ -1,6 +1,7 @@
 const express = require('express')
 const bodyParser = require('body-parser')
 const Log = require('../Utilities/Log.js')
+const Database = require('../Utilities/Database.js')
 const tag = 'TelevisionUI'
 const compression = require('compression')
 
@@ -89,17 +90,20 @@ class TelevisionUI {
 
     // Dynamic manifest - always reflects current channelPool state
     // Only includes channels that have at least one transcoded video
+    // OPTIMIZED: Uses database query instead of generating master playlist
     this.app.get(`/manifest.json`, function(req,res){
         var manifest = {
           channels: [],
           upcoming: []
         }
 
+        const db = Database()
+
         ChannelPool().queue.forEach(channel => {
-          if (channel.started && channel.playlistManager) {
-            // Only include channels that have at least one transcoded video
-            const segments = channel.playlistManager.generateMasterPlaylist()
-            if (segments.length > 0) {
+          if (channel.started) {
+            // Fast database query to check if channel has transcoded videos
+            const stats = db.getChannelStats(channel.slug)
+            if (stats && stats.transcoded > 0) {
               manifest.channels.push({
                 name: channel.name,
                 slug: channel.slug
@@ -108,6 +112,33 @@ class TelevisionUI {
           }
         })
         res.send(JSON.stringify(manifest))
+    })
+
+    // Database stats endpoint
+    this.app.get(`/api/db-stats`, function(req,res){
+        const db = Database()
+        const channels = db.getAllChannels()
+        const stats = channels.map(channel => {
+            const channelStats = db.getChannelStats(channel.slug)
+            return {
+                name: channel.name,
+                slug: channel.slug,
+                totalVideos: channelStats.total,
+                transcodedVideos: channelStats.transcoded,
+                pendingVideos: channelStats.total - channelStats.transcoded,
+                percentComplete: channelStats.total > 0
+                    ? Math.round((channelStats.transcoded / channelStats.total) * 100)
+                    : 0
+            }
+        })
+        res.json({
+            channels: stats,
+            totals: {
+                totalVideos: stats.reduce((sum, s) => sum + s.totalVideos, 0),
+                transcodedVideos: stats.reduce((sum, s) => sum + s.transcodedVideos, 0),
+                pendingVideos: stats.reduce((sum, s) => sum + s.pendingVideos, 0)
+            }
+        })
     })
 
     // Debug endpoint to check playlist stats and current playback

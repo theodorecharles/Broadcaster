@@ -2,6 +2,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const Log = require('../Utilities/Log.js')
+const Database = require('../Utilities/Database.js')
 const tag = 'PlaylistManager'
 const { CACHE_DIR } = process.env
 
@@ -59,22 +60,35 @@ class PlaylistManager {
 
     /**
      * Generate a master playlist that combines all videos in sequence
+     * OPTIMIZED: Uses database to filter transcoded videos before filesystem access
      */
     generateMasterPlaylist() {
         const segments = []
         let totalDuration = 0
 
-        this.channel.queue.forEach((filePath, index) => {
-            const videoHash = this.getVideoHash(filePath)
-            const playlistPath = this.getVideoPlaylistPath(filePath)
-            const metadataPath = path.join(path.dirname(playlistPath), 'metadata.json')
+        // Get transcoded videos from database (fast!)
+        const db = Database()
+        const transcodedVideos = db.getChannelVideos(this.channel.slug, true)
+        const transcodedSet = new Set(transcodedVideos.map(v => v.file_path))
 
-            if (!fs.existsSync(playlistPath)) {
+        // Build lookup for queue index
+        const queueIndexMap = new Map()
+        this.channel.queue.forEach((filePath, index) => {
+            queueIndexMap.set(filePath, index)
+        })
+
+        // Only process videos that are both in queue AND transcoded
+        this.channel.queue.forEach((filePath, index) => {
+            // Skip if not transcoded (database check is fast)
+            if (!transcodedSet.has(filePath)) {
                 return
             }
 
-            // Require metadata.json to exist - it's only written after successful transcoding
-            if (!fs.existsSync(metadataPath)) {
+            const videoHash = this.getVideoHash(filePath)
+            const playlistPath = this.getVideoPlaylistPath(filePath)
+
+            // Final verification: check if playlist exists and is complete
+            if (!fs.existsSync(playlistPath)) {
                 return
             }
 
