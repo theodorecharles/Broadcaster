@@ -263,10 +263,12 @@ class PreGenerator {
     /**
      * Add a channel's videos to the generation queue
      * OPTIMIZED: Single bulk database query instead of N individual queries
+     * Manifest updates are deferred to avoid blocking startup
      */
     queueChannel(channel) {
-        // Update manifest first
-        this.updateChannelManifest(channel)
+        // Defer manifest update to background - don't block startup
+        this.pendingManifestUpdates = this.pendingManifestUpdates || []
+        this.pendingManifestUpdates.push(channel)
 
         // Get all transcoded videos in one query (FAST!)
         const db = Database()
@@ -278,17 +280,9 @@ class PreGenerator {
 
         channel.queue.forEach(filePath => {
             // Fast Set lookup instead of database query per video
+            // Trust the database - filesystem verification only happens when actually transcoding
             if (transcodedPaths.has(filePath)) {
-                // Still verify filesystem for videos marked as transcoded
-                if (this.isAlreadyGenerated(filePath, channel.slug)) {
-                    skippedCount++
-                } else {
-                    // Database said transcoded but filesystem check failed
-                    channelQueue.push({
-                        filePath,
-                        channel
-                    })
-                }
+                skippedCount++
             } else {
                 // Not in database, needs transcoding
                 channelQueue.push({
@@ -514,6 +508,26 @@ class PreGenerator {
     }
 
     /**
+     * Process deferred manifest updates (runs in background during generation)
+     */
+    async processPendingManifestUpdates() {
+        if (!this.pendingManifestUpdates || this.pendingManifestUpdates.length === 0) {
+            return
+        }
+
+        Log(tag, `Updating manifests for ${this.pendingManifestUpdates.length} channels...`)
+
+        for (const channel of this.pendingManifestUpdates) {
+            // Yield to event loop between channels
+            await new Promise(resolve => setImmediate(resolve))
+            this.updateChannelManifest(channel)
+        }
+
+        this.pendingManifestUpdates = []
+        Log(tag, 'Manifest updates complete')
+    }
+
+    /**
      * Process the generation queue sequentially
      */
     async startGeneration() {
@@ -521,6 +535,9 @@ class PreGenerator {
             Log(tag, 'Generation already in progress')
             return
         }
+
+        // Process deferred manifest updates first (in background)
+        await this.processPendingManifestUpdates()
 
         // Build interleaved queue before starting
         this.buildInterleavedQueue()
