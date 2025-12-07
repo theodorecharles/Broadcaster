@@ -1,6 +1,6 @@
 require('dotenv').config({ path: `./config.txt` })
 const ChannelPool = require('./Utilities/ChannelPool.js')
-const { Channel } = require('./Classes/Channel.js')
+const { Channel, initQueueCache, saveAllQueues, resetQueueCache } = require('./Classes/Channel.js')
 const PreGenerator = require('./Utilities/PreGenerator.js')
 const { migrateAll } = require('./Utilities/MigrateDatabase.js')
 const Log = require('./Utilities/Log.js')
@@ -56,12 +56,22 @@ function loadChannels() {
 }
 
 // Initialize channels from config
-function initializeChannels(channelDefinitions) {
+function initializeChannels(channelDefinitions, useCache = true) {
   try {
+    // Initialize queue cache before creating channels
+    if (useCache) {
+      initQueueCache(channelsPath)
+    }
+
     channelDefinitions.forEach(definition => {
       const channel = new Channel(definition)
       ChannelPool().addChannel(channel)
     })
+
+    // Save queue cache after all channels are created (if we scanned filesystem)
+    if (useCache) {
+      saveAllQueues(ChannelPool().queue)
+    }
   } catch (e) {
     Log(tag, 'Unable to create channels: ' + e)
   }
@@ -74,6 +84,9 @@ async function reloadChannels() {
   // Clear existing channels
   ChannelPool().clearChannels()
 
+  // Reset queue cache so we rescan filesystem
+  resetQueueCache()
+
   // Reset PreGenerator queue
   PreGenerator.generationQueue = []
   PreGenerator.channelQueues = []
@@ -81,7 +94,7 @@ async function reloadChannels() {
   PreGenerator.totalVideos = 0
   PreGenerator.isGenerating = false
 
-  // Load and initialize new channels
+  // Load and initialize new channels (will rescan and save new cache)
   const channelDefinitions = loadChannels()
   initializeChannels(channelDefinitions)
 

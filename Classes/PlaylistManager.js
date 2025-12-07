@@ -11,6 +11,20 @@ class PlaylistManager {
     constructor(channel) {
         this.channel = channel
         this.currentIndex = 0
+
+        // Cache for master playlist segments
+        this.cachedSegments = null
+        this.cacheTime = 0
+        this.CACHE_TTL = 60000 // 1 minute - regenerate after transcode changes
+    }
+
+    /**
+     * Invalidate the cached master playlist
+     * Call this when videos are added/removed or transcoding completes
+     */
+    invalidateCache() {
+        this.cachedSegments = null
+        this.cacheTime = 0
     }
 
     /**
@@ -134,7 +148,15 @@ class PlaylistManager {
      * Handles looping by wrapping around to the beginning when near the end
      */
     createRollingPlaylist(offsetSeconds = 0) {
-        const allSegments = this.generateMasterPlaylist()
+        // Use cached segments if available and fresh
+        let allSegments = this.cachedSegments
+        const now = Date.now()
+
+        if (!allSegments || now - this.cacheTime > this.CACHE_TTL) {
+            allSegments = this.generateMasterPlaylist()
+            this.cachedSegments = allSegments
+            this.cacheTime = now
+        }
 
         if (allSegments.length === 0) {
             return '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-ENDLIST\n'

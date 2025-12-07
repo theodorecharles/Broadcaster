@@ -24,9 +24,96 @@ function findFiles(dir, fileList = []) {
   return fileList
 }
 
-function Channel(definition) {
+// Path to cache file for channel queues
+function getQueueCachePath() {
+  return path.join(CACHE_DIR, 'queue-cache.json')
+}
 
-  Log(tag, `Building the queue...`, definition)
+// Load cached queues if channels.json hasn't changed
+function loadQueueCache(channelsJsonHash) {
+  try {
+    const cachePath = getQueueCachePath()
+    if (!fs.existsSync(cachePath)) return null
+
+    const cache = JSON.parse(fs.readFileSync(cachePath, 'utf8'))
+    if (cache.channelsHash !== channelsJsonHash) {
+      Log(tag, 'channels.json changed, will rescan filesystem')
+      return null
+    }
+
+    Log(tag, 'Using cached queue data (channels.json unchanged)')
+    return cache.queues
+  } catch (e) {
+    Log(tag, `Could not load queue cache: ${e.message}`)
+    return null
+  }
+}
+
+// Save queue cache with channels.json hash
+function saveQueueCache(channelsJsonHash, queues) {
+  try {
+    const cachePath = getQueueCachePath()
+    const cacheDir = path.dirname(cachePath)
+    if (!fs.existsSync(cacheDir)) {
+      fs.mkdirSync(cacheDir, { recursive: true })
+    }
+
+    fs.writeFileSync(cachePath, JSON.stringify({
+      channelsHash: channelsJsonHash,
+      queues: queues,
+      savedAt: Date.now()
+    }, null, 2))
+  } catch (e) {
+    Log(tag, `Could not save queue cache: ${e.message}`)
+  }
+}
+
+// Compute hash of channels.json content
+function hashChannelsJson(channelsPath) {
+  try {
+    const content = fs.readFileSync(channelsPath, 'utf8')
+    return crypto.createHash('md5').update(content).digest('hex')
+  } catch (e) {
+    return null
+  }
+}
+
+// Module-level cache for queue loading
+let queueCacheLoaded = false
+let queueCacheData = null
+let channelsHash = null
+
+// Initialize queue cache - call this once before creating channels
+function initQueueCache(channelsPath) {
+  if (queueCacheLoaded) return
+
+  channelsHash = hashChannelsJson(channelsPath)
+  if (channelsHash) {
+    queueCacheData = loadQueueCache(channelsHash)
+  }
+  queueCacheLoaded = true
+}
+
+// Save all channel queues to cache - call after all channels are created
+function saveAllQueues(channels) {
+  if (!channelsHash) return
+
+  const queues = {}
+  channels.forEach(channel => {
+    queues[channel.slug] = channel.queue
+  })
+  saveQueueCache(channelsHash, queues)
+  Log(tag, `Saved queue cache for ${channels.length} channels`)
+}
+
+// Reset the cache state (for reloads)
+function resetQueueCache() {
+  queueCacheLoaded = false
+  queueCacheData = null
+  channelsHash = null
+}
+
+function Channel(definition) {
 
   this.type = definition.type
   this.name = definition.name
@@ -37,22 +124,34 @@ function Channel(definition) {
   this.startTime = null
   this.started = false
 
-  definition.paths.forEach(dirPath => {
+  // Check if we have cached queue data for this channel
+  if (queueCacheData && queueCacheData[this.slug]) {
+    this.queue = queueCacheData[this.slug]
+    Log(tag, `Loaded ${this.queue.length} files from cache`, this)
 
-    var x = 0
-    const files = findFiles(dirPath)
+    // Still need to shuffle if type is shuffle (cached order may be stale)
+    if (definition.type == 'shuffle') {
+      this.queue.sort(() => Math.random() - 0.5)
+    }
+  } else {
+    // No cache - scan filesystem
+    Log(tag, `Scanning filesystem...`, this)
 
-    files.forEach(file => {
-      if (Format.isSupported(file)) {
-        this.queue.push(file)
-        x++
-      }
+    definition.paths.forEach(dirPath => {
+      var x = 0
+      const files = findFiles(dirPath)
+
+      files.forEach(file => {
+        if (Format.isSupported(file)) {
+          this.queue.push(file)
+          x++
+        }
+      })
+      Log(tag, `Found ${x} supported files in ${dirPath}`, this)
+
+      if (definition.type == 'shuffle') this.queue.sort(() => Math.random() - 0.5)
     })
-    Log(tag, `Found ${x} supported files in ${dirPath}`, this)
-
-    if (definition.type == 'shuffle') this.queue.sort(() => Math.random() - 0.5)
-
-  })
+  }
 
   // Register channel and videos in database
   const db = Database()
@@ -102,5 +201,8 @@ function Channel(definition) {
 }
 
 module.exports = {
-  Channel: Channel
+  Channel: Channel,
+  initQueueCache: initQueueCache,
+  saveAllQueues: saveAllQueues,
+  resetQueueCache: resetQueueCache
 }
