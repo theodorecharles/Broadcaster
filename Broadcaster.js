@@ -88,14 +88,17 @@ async function reloadChannels() {
   Log(tag, 'Channels reloaded - migration and pre-generation running in background')
 
   // Run migration and generation in background
-  setImmediate(() => {
+  setImmediate(async () => {
     // Migrate existing transcoded videos to database
     migrateAll()
 
-    // Queue and generate any missing streams
-    ChannelPool().queue.forEach(channel => {
-      PreGenerator.queueChannel(channel)
-    })
+    // Queue channels asynchronously (don't block event loop!)
+    for (const channel of ChannelPool().queue) {
+      await new Promise(resolve => setImmediate(() => {
+        PreGenerator.queueChannel(channel)
+        resolve()
+      }))
+    }
 
     // Start broadcasting on channels that have content ready
     ChannelPool().startBroadcast()
@@ -157,15 +160,20 @@ async function startup() {
 
   // Run migration in background (don't await)
   Log(tag, 'Migrating existing transcoded videos to database (background)...')
-  setImmediate(() => {
+  setImmediate(async () => {
     migrateAll()
 
-    // After migration, queue and generate
+    // After migration, queue channels asynchronously (don't block event loop!)
     Log(tag, 'Checking for pre-generated HLS streams...')
 
-    ChannelPool().queue.forEach(channel => {
-      PreGenerator.queueChannel(channel)
-    })
+    // Queue channels one at a time with setImmediate between each
+    // This allows the event loop to process web requests between channels
+    for (const channel of ChannelPool().queue) {
+      await new Promise(resolve => setImmediate(() => {
+        PreGenerator.queueChannel(channel)
+        resolve()
+      }))
+    }
 
     // Start broadcast immediately - channels will play whatever content is ready
     // Guide and playlist automatically exclude videos that aren't transcoded yet
