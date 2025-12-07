@@ -263,22 +263,39 @@ class PreGenerator {
 
     /**
      * Add a channel's videos to the generation queue
+     * OPTIMIZED: Single bulk database query instead of N individual queries
      */
     queueChannel(channel) {
         // Update manifest first
         this.updateChannelManifest(channel)
 
+        // Get all transcoded videos in one query (FAST!)
+        const db = Database()
+        const transcodedVideos = db.getChannelVideos(channel.slug, true)
+        const transcodedPaths = new Set(transcodedVideos.map(v => v.file_path))
+
         const channelQueue = []
         let skippedCount = 0
 
         channel.queue.forEach(filePath => {
-            if (!this.isAlreadyGenerated(filePath, channel.slug)) {
+            // Fast Set lookup instead of database query per video
+            if (transcodedPaths.has(filePath)) {
+                // Still verify filesystem for videos marked as transcoded
+                if (this.isAlreadyGenerated(filePath, channel.slug)) {
+                    skippedCount++
+                } else {
+                    // Database said transcoded but filesystem check failed
+                    channelQueue.push({
+                        filePath,
+                        channel
+                    })
+                }
+            } else {
+                // Not in database, needs transcoding
                 channelQueue.push({
                     filePath,
                     channel
                 })
-            } else {
-                skippedCount++
             }
         })
 
