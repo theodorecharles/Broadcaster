@@ -1,6 +1,6 @@
 require('dotenv').config({ path: `./config.txt` })
 const ChannelPool = require('./Utilities/ChannelPool.js')
-const { Channel, initQueueCache, saveAllQueues, resetQueueCache } = require('./Classes/Channel.js')
+const { Channel, initQueueCache, saveAllQueues } = require('./Classes/Channel.js')
 const PreGenerator = require('./Utilities/PreGenerator.js')
 const { migrateAll } = require('./Utilities/MigrateDatabase.js')
 const Log = require('./Utilities/Log.js')
@@ -77,82 +77,6 @@ function initializeChannels(channelDefinitions, useCache = true) {
   }
 }
 
-// Reload channels when channels.json changes
-async function reloadChannels() {
-  Log(tag, 'Reloading channels...')
-
-  // Clear existing channels
-  ChannelPool().clearChannels()
-
-  // Reset queue cache so we rescan filesystem
-  resetQueueCache()
-
-  // Reset PreGenerator queue
-  PreGenerator.generationQueue = []
-  PreGenerator.channelQueues = []
-  PreGenerator.currentIndex = 0
-  PreGenerator.totalVideos = 0
-  PreGenerator.isGenerating = false
-
-  // Load and initialize new channels (will rescan and save new cache)
-  const channelDefinitions = loadChannels()
-  initializeChannels(channelDefinitions)
-
-  Log(tag, 'Channels reloaded - migration and pre-generation running in background')
-
-  // Run migration and generation in background
-  setImmediate(async () => {
-    // Migrate existing transcoded videos to database
-    migrateAll()
-
-    // Queue channels asynchronously (don't block event loop!)
-    for (const channel of ChannelPool().queue) {
-      await new Promise(resolve => setImmediate(() => {
-        PreGenerator.queueChannel(channel)
-        resolve()
-      }))
-    }
-
-    // Start broadcasting on channels that have content ready
-    ChannelPool().startBroadcast()
-
-    // Start generation in background
-    PreGenerator.startGeneration().then(() => {
-      Log(tag, 'All HLS streams ready after reload!')
-    })
-  })
-}
-
-// Watch channels.json for changes using polling (more reliable across systems)
-function watchChannelsFile() {
-  let lastMtime = null
-
-  // Get initial mtime
-  try {
-    lastMtime = fs.statSync(channelsPath).mtimeMs
-  } catch (e) {
-    Log(tag, `Could not stat ${channelsPath}: ${e.message}`)
-  }
-
-  // Poll every 5 minutes
-  setInterval(() => {
-    try {
-      const currentMtime = fs.statSync(channelsPath).mtimeMs
-      if (lastMtime && currentMtime !== lastMtime) {
-        Log(tag, 'channels.json changed, reloading...')
-        lastMtime = currentMtime
-        reloadChannels()
-      } else if (!lastMtime) {
-        lastMtime = currentMtime
-      }
-    } catch (e) {
-      // File might be temporarily unavailable during write
-    }
-  }, 5 * 60 * 1000)
-
-  Log(tag, `Watching ${channelsPath} for changes (polling every 5 minutes)`)
-}
-
 // Startup sequence
 async function startup() {
   // Load initial channels
@@ -167,9 +91,6 @@ async function startup() {
   } catch (e) {
     Log(tag, 'Unable to start the TV UI: ' + e)
   }
-
-  // Start watching for channel config changes
-  watchChannelsFile()
 
   // Run migration in background (don't await)
   Log(tag, 'Migrating existing transcoded videos to database (background)...')
