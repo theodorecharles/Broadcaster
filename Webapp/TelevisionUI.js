@@ -15,16 +15,24 @@ const path = require('path')
 const ChannelPool = require('../Utilities/ChannelPool.js')
 
 // express app that listens on specified port and handles GET requests for .m3u8 files
-// asynchronously 'caches the ffmpeg .m3u8 files every X seconds
+// Guide cache is regenerated once on startup and daily at 3am
 
 var ui = null
 
-// Guide cache - pre-generated and refreshed in background
+// Guide cache - pre-generated and refreshed at 3am daily
 let guideCache = null
-const GUIDE_REFRESH_INTERVAL = 60 * 1000
+let guideRegenerationTimer = null
 
-// Function to regenerate guide cache
+// Function to regenerate guide cache (non-blocking)
 function regenerateGuideCache() {
+    // Use setImmediate to avoid blocking the event loop during HTTP requests
+    setImmediate(() => {
+        regenerateGuideCacheSync()
+    })
+}
+
+// Synchronous guide cache regeneration (called via setImmediate)
+function regenerateGuideCacheSync() {
     const guide = {
         dayStart: null,
         channels: {}
@@ -51,6 +59,34 @@ function regenerateGuideCache() {
 
     guideCache = guide
     Log('TelevisionUI', `Guide cache regenerated with ${Object.keys(guide.channels).length} channels`)
+}
+
+// Calculate milliseconds until next 3am
+function msUntilNext3am() {
+    const now = new Date()
+    const next3am = new Date(now)
+    next3am.setHours(3, 0, 0, 0)
+    if (next3am <= now) {
+        next3am.setDate(next3am.getDate() + 1)
+    }
+    return next3am.getTime() - now.getTime()
+}
+
+// Schedule daily guide regeneration at 3am
+function scheduleDaily3amRegeneration() {
+    if (guideRegenerationTimer) {
+        clearTimeout(guideRegenerationTimer)
+    }
+
+    const msUntil3am = msUntilNext3am()
+    const hoursUntil = (msUntil3am / (1000 * 60 * 60)).toFixed(1)
+    Log('TelevisionUI', `Next guide regeneration scheduled in ${hoursUntil} hours (at 3am)`)
+
+    guideRegenerationTimer = setTimeout(() => {
+        regenerateGuideCache()
+        // Schedule the next one
+        scheduleDaily3amRegeneration()
+    }, msUntil3am)
 }
 
 class TelevisionUI {
@@ -214,10 +250,10 @@ class TelevisionUI {
         })
     })
 
-    // Pre-generate guide cache and refresh every 60 seconds
+    // Pre-generate guide cache once on startup, then regenerate daily at 3am
     setTimeout(() => {
         regenerateGuideCache()
-        setInterval(regenerateGuideCache, GUIDE_REFRESH_INTERVAL)
+        scheduleDaily3amRegeneration()
     }, 2000) // Wait 2 seconds for channels to be fully started
 
     // TV Guide API - returns pre-cached guide instantly

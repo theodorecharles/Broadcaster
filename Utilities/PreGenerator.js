@@ -4,7 +4,6 @@ const path = require('path')
 const crypto = require('crypto')
 const Log = require('./Log.js')
 const Database = require('./Database.js')
-const { regenerateGuideCache } = require('../Webapp/TelevisionUI.js')
 const tag = 'PreGenerator'
 
 const { CACHE_DIR,
@@ -498,9 +497,6 @@ class PreGenerator {
                     } catch (dbErr) {
                         Log(tag, `Database update error: ${dbErr.message}`, channel)
                     }
-
-                    // Refresh guide cache immediately so new content appears
-                    regenerateGuideCache()
 
                     resolve()
                 } else {
