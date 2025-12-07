@@ -85,23 +85,26 @@ async function reloadChannels() {
   const channelDefinitions = loadChannels()
   initializeChannels(channelDefinitions)
 
-  // Migrate existing transcoded videos to database
-  migrateAll()
+  Log(tag, 'Channels reloaded - migration and pre-generation running in background')
 
-  // Queue and generate any missing streams (runs in background)
-  ChannelPool().queue.forEach(channel => {
-    PreGenerator.queueChannel(channel)
+  // Run migration and generation in background
+  setImmediate(() => {
+    // Migrate existing transcoded videos to database
+    migrateAll()
+
+    // Queue and generate any missing streams
+    ChannelPool().queue.forEach(channel => {
+      PreGenerator.queueChannel(channel)
+    })
+
+    // Start broadcasting on channels that have content ready
+    ChannelPool().startBroadcast()
+
+    // Start generation in background
+    PreGenerator.startGeneration().then(() => {
+      Log(tag, 'All HLS streams ready after reload!')
+    })
   })
-
-  // Start generation in background - don't await
-  PreGenerator.startGeneration().then(() => {
-    Log(tag, 'All HLS streams ready after reload!')
-  })
-
-  // Start broadcasting on channels that have content ready
-  ChannelPool().startBroadcast()
-
-  Log(tag, 'Channels reloaded - pre-generation running in background')
 }
 
 // Watch channels.json for changes using polling (more reliable across systems)
@@ -140,15 +143,11 @@ async function startup() {
   const channelDefinitions = loadChannels()
   initializeChannels(channelDefinitions)
 
-  // Migrate existing transcoded videos to database
-  Log(tag, 'Migrating existing transcoded videos to database...')
-  migrateAll()
-
-  // Start UI immediately (before pre-generation)
+  // Start UI immediately - don't block on migration!
   try {
     TelevisionUI().start(ChannelPool())
     uiStarted = true
-    Log(tag, 'Web UI started')
+    Log(tag, 'Web UI started and ready')
   } catch (e) {
     Log(tag, 'Unable to start the TV UI: ' + e)
   }
@@ -156,8 +155,12 @@ async function startup() {
   // Start watching for channel config changes
   watchChannelsFile()
 
-  // Queue all channels for generation
-  try {
+  // Run migration in background (don't await)
+  Log(tag, 'Migrating existing transcoded videos to database (background)...')
+  setImmediate(() => {
+    migrateAll()
+
+    // After migration, queue and generate
     Log(tag, 'Checking for pre-generated HLS streams...')
 
     ChannelPool().queue.forEach(channel => {
@@ -170,13 +173,12 @@ async function startup() {
     Log(tag, 'Broadcast started - transcoding continues in background')
 
     // Generate remaining streams in background
-    await PreGenerator.startGeneration()
-
-    Log(tag, 'All HLS streams ready!')
-
-  } catch (e) {
-    Log(tag, 'Error during pre-generation: ' + e)
-  }
+    PreGenerator.startGeneration().then(() => {
+      Log(tag, 'All HLS streams ready!')
+    }).catch(e => {
+      Log(tag, 'Error during pre-generation: ' + e)
+    })
+  })
 }
 
 startup()
