@@ -492,6 +492,11 @@ class PreGenerator {
                         Log(tag, `Database update error: ${dbErr.message}`, channel)
                     }
 
+                    // Invalidate playlist cache so newly transcoded video appears
+                    if (channel.playlistManager) {
+                        channel.playlistManager.invalidateCache()
+                    }
+
                     resolve()
                 } else {
                     Log(tag, `Failed to generate ${path.basename(filePath)} (exit code ${code})`, channel)

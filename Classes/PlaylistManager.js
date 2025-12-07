@@ -12,10 +12,8 @@ class PlaylistManager {
         this.channel = channel
         this.currentIndex = 0
 
-        // Cache for master playlist segments
+        // Cache for master playlist segments - invalidated explicitly when transcoding completes
         this.cachedSegments = null
-        this.cacheTime = 0
-        this.CACHE_TTL = 60000 // 1 minute - regenerate after transcode changes
     }
 
     /**
@@ -24,7 +22,6 @@ class PlaylistManager {
      */
     invalidateCache() {
         this.cachedSegments = null
-        this.cacheTime = 0
     }
 
     /**
@@ -148,14 +145,12 @@ class PlaylistManager {
      * Handles looping by wrapping around to the beginning when near the end
      */
     createRollingPlaylist(offsetSeconds = 0) {
-        // Use cached segments if available and fresh
+        // Use cached segments if available (cache is invalidated when transcoding completes)
         let allSegments = this.cachedSegments
-        const now = Date.now()
 
-        if (!allSegments || now - this.cacheTime > this.CACHE_TTL) {
+        if (!allSegments) {
             allSegments = this.generateMasterPlaylist()
             this.cachedSegments = allSegments
-            this.cacheTime = now
         }
 
         if (allSegments.length === 0) {
