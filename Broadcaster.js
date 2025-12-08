@@ -96,17 +96,15 @@ async function startup() {
   Log(tag, 'Migrating existing transcoded videos to database (background)...')
   setImmediate(async () => {
     migrateAll()
-    const backfilled = backfillDurations()
+    backfillDurations()
 
-    // If we backfilled any videos, invalidate all playlist caches so they pick up the new data
-    if (backfilled > 0) {
-      Log(tag, 'Invalidating playlist caches after backfill...')
-      ChannelPool().queue.forEach(channel => {
-        if (channel.playlistManager) {
-          channel.playlistManager.invalidateCache()
-        }
-      })
-    }
+    // Invalidate all playlist caches so they pick up any backfilled data
+    Log(tag, 'Invalidating playlist caches after migration...')
+    ChannelPool().queue.forEach(channel => {
+      if (channel.playlistManager) {
+        channel.playlistManager.invalidateCache()
+      }
+    })
 
     // After migration, queue channels asynchronously (don't block event loop!)
     Log(tag, 'Checking for pre-generated HLS streams...')
