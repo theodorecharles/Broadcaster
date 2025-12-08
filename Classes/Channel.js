@@ -163,6 +163,7 @@ function Channel(definition) {
   }
 
   // Register channel and videos in database
+  let t0 = Date.now()
   const db = Database()
   const channelId = db.upsertChannel(this.slug, this.name, this.type)
 
@@ -176,23 +177,28 @@ function Channel(definition) {
       addedCount++
     }
   })
+  Log(tag, `DB inserts took ${Date.now() - t0}ms`, this)
 
   // Clean up videos that are no longer in the queue
+  t0 = Date.now()
   const deletedHashes = db.deleteRemovedVideos(this.slug, this.queue)
   if (deletedHashes.length > 0) {
     Log(tag, `Removed ${deletedHashes.length} videos from database that are no longer in queue`, this)
   }
+  Log(tag, `DB cleanup took ${Date.now() - t0}ms`, this)
 
   if (addedCount > 0) {
     Log(tag, `Added ${addedCount} new videos to database`, this)
   }
 
   // Initialize playlist manager
+  t0 = Date.now()
   this.playlistManager = new PlaylistManager(this)
 
   // Pre-warm the playlist cache during initialization (before web server starts)
   // This ensures first request is fast even if channel.start() hasn't been called yet
   this.playlistManager.cachedSegments = this.playlistManager.generateMasterPlaylist()
+  Log(tag, `Playlist pre-warm took ${Date.now() - t0}ms`, this)
 
   // Start method
   this.start = () => {
