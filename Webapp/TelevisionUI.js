@@ -31,6 +31,20 @@ function regenerateGuideCache() {
     })
 }
 
+// Save guide to history folder for analysis
+function saveGuideToHistory(guide) {
+    const historyDir = path.join(CACHE_DIR, 'history')
+    fs.mkdirSync(historyDir, { recursive: true })
+
+    const now = new Date()
+    const timestamp = now.toISOString().replace(/[:.]/g, '-')
+    const filename = `guide-${timestamp}.json`
+    const filePath = path.join(historyDir, filename)
+
+    fs.writeFileSync(filePath, JSON.stringify(guide, null, 2))
+    Log('TelevisionUI', `Guide saved to history: ${filename}`)
+}
+
 // Synchronous guide cache regeneration (called via setImmediate)
 function regenerateGuideCacheSync() {
     const guide = {
@@ -59,6 +73,11 @@ function regenerateGuideCacheSync() {
 
     guideCache = guide
     Log('TelevisionUI', `Guide cache regenerated with ${Object.keys(guide.channels).length} channels`)
+
+    // Save to history for analysis
+    if (Object.keys(guide.channels).length > 0) {
+        saveGuideToHistory(guide)
+    }
 }
 
 // Calculate milliseconds until next 3am

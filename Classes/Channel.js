@@ -24,6 +24,15 @@ function findFiles(dir, fileList = []) {
   return fileList
 }
 
+// Fisher-Yates shuffle for uniform randomization
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]]
+  }
+  return array
+}
+
 // Path to cache file for channel queues
 function getQueueCachePath() {
   return path.join(CACHE_DIR, 'queue-cache.json')
@@ -131,7 +140,7 @@ function Channel(definition) {
 
     // Still need to shuffle if type is shuffle (cached order may be stale)
     if (definition.type == 'shuffle') {
-      this.queue.sort(() => Math.random() - 0.5)
+      shuffleArray(this.queue)
     }
   } else {
     // No cache - scan filesystem
@@ -149,7 +158,7 @@ function Channel(definition) {
       })
       Log(tag, `Found ${x} supported files in ${dirPath}`, this)
 
-      if (definition.type == 'shuffle') this.queue.sort(() => Math.random() - 0.5)
+      if (definition.type == 'shuffle') shuffleArray(this.queue)
     })
   }
 
