@@ -45,6 +45,51 @@ function saveGuideToHistory(guide) {
     Log('TelevisionUI', `Guide saved to history: ${filename}`)
 }
 
+// Load most recent guide from history if it's from the current day period (3am-3am)
+function loadGuideFromHistory() {
+    const historyDir = path.join(CACHE_DIR, 'history')
+
+    if (!fs.existsSync(historyDir)) {
+        return null
+    }
+
+    try {
+        const files = fs.readdirSync(historyDir)
+            .filter(f => f.startsWith('guide-') && f.endsWith('.json'))
+            .sort()
+            .reverse()
+
+        if (files.length === 0) {
+            return null
+        }
+
+        // Load most recent guide
+        const latestFile = files[0]
+        const filePath = path.join(historyDir, latestFile)
+        const guide = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+
+        // Check if guide is from current day period (3am to 3am)
+        // dayStart in guide should match current day's 3am boundary
+        const now = new Date()
+        const today3am = new Date(now)
+        today3am.setHours(3, 0, 0, 0)
+        if (now.getHours() < 3) {
+            today3am.setDate(today3am.getDate() - 1)
+        }
+
+        if (guide.dayStart && guide.dayStart === today3am.getTime()) {
+            Log('TelevisionUI', `Loaded guide from history: ${latestFile}`)
+            return guide
+        }
+
+        Log('TelevisionUI', `Guide in history is from different day, will regenerate`)
+        return null
+    } catch (err) {
+        Log('TelevisionUI', `Error loading guide from history: ${err.message}`)
+        return null
+    }
+}
+
 // Synchronous guide cache regeneration (called via setImmediate)
 function regenerateGuideCacheSync() {
     const guide = {
@@ -269,11 +314,18 @@ class TelevisionUI {
         })
     })
 
-    // Pre-generate guide cache once on startup, then regenerate daily at 3am
-    setTimeout(() => {
-        regenerateGuideCache()
-        scheduleDaily3amRegeneration()
-    }, 2000) // Wait 2 seconds for channels to be fully started
+    // Try to load guide from history first, only regenerate if needed
+    const cachedGuide = loadGuideFromHistory()
+    if (cachedGuide) {
+        guideCache = cachedGuide
+        Log('TelevisionUI', `Using cached guide with ${Object.keys(cachedGuide.channels).length} channels`)
+    } else {
+        // No valid cached guide, regenerate after channels start
+        setTimeout(() => {
+            regenerateGuideCache()
+        }, 2000)
+    }
+    scheduleDaily3amRegeneration()
 
     // TV Guide API - returns pre-cached guide instantly
     this.app.get(`/api/guide`, function(req,res){
