@@ -190,9 +190,8 @@ function Channel(definition) {
   // Initialize playlist manager
   this.playlistManager = new PlaylistManager(this)
 
-  // Pre-warm the playlist cache during initialization (before web server starts)
-  // This ensures first request is fast even if channel.start() hasn't been called yet
-  this.playlistManager.cachedSegments = this.playlistManager.generateMasterPlaylist()
+  // Pre-warm the video list cache (lightweight metadata only, not all segments)
+  this.playlistManager.cachedVideoList = this.playlistManager.buildVideoList()
 
   // Start method
   this.start = () => {

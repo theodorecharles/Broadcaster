@@ -249,26 +249,28 @@ class TelevisionUI {
             res.json({ error: 'Channel not found' })
             return
         }
-        const allSegments = channel.playlistManager.generateMasterPlaylist()
-        const videoHashes = [...new Set(allSegments.map(s => s.path.split('/')[3]))]
-        const offset = channel.playlistManager.getCurrentOffset()
-        const totalDuration = allSegments.length > 0 ? allSegments[allSegments.length - 1].timestamp : 0
-        const normalizedOffset = offset % totalDuration
 
-        // Find current segment/video
-        let currentSegmentIndex = 0
-        for (let i = 0; i < allSegments.length; i++) {
-            if (allSegments[i].timestamp > normalizedOffset) {
-                currentSegmentIndex = i
+        // Use cached video list (lightweight)
+        const videoList = channel.playlistManager.cachedVideoList || channel.playlistManager.buildVideoList()
+        const { videos, totalDuration } = videoList
+
+        const offset = channel.playlistManager.getCurrentOffset()
+        const normalizedOffset = totalDuration > 0 ? offset % totalDuration : 0
+
+        // Find current video based on offset
+        let currentVideo = null
+        for (const video of videos) {
+            if (video.startTime + video.duration > normalizedOffset) {
+                currentVideo = video
                 break
             }
         }
-        const currentSegment = allSegments[currentSegmentIndex]
-        const currentVideoPath = currentSegment ? channel.queue[currentSegment.videoIndex] : null
-        const currentVideoName = currentVideoPath ? channel.playlistManager.getVideoDisplayName(currentVideoPath) : null
-        const currentVideoHash = currentVideoPath ? channel.playlistManager.getVideoHash(currentVideoPath) : null
 
-        // Try to read the metadata.json for the current video to see what was actually transcoded
+        const currentVideoPath = currentVideo ? channel.queue[currentVideo.videoIndex] : null
+        const currentVideoName = currentVideoPath ? channel.playlistManager.getVideoDisplayName(currentVideoPath) : null
+        const currentVideoHash = currentVideo ? currentVideo.hash : null
+
+        // Try to read the metadata.json for the current video
         let transcodedFromPath = null
         if (currentVideoHash) {
             try {
@@ -295,11 +297,9 @@ class TelevisionUI {
             normalizedOffset: Math.round(normalizedOffset),
             totalDuration: Math.round(totalDuration),
             queueLength: channel.queue.length,
-            totalSegments: allSegments.length,
-            uniqueVideos: videoHashes.length,
+            transcodedVideos: videos.length,
             playlistSays: {
-                segmentIndex: currentSegmentIndex,
-                videoIndex: currentSegment?.videoIndex,
+                videoIndex: currentVideo?.videoIndex,
                 videoName: currentVideoName,
                 videoPath: currentVideoPath,
                 videoHash: currentVideoHash,

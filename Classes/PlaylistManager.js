@@ -12,16 +12,16 @@ class PlaylistManager {
         this.channel = channel
         this.currentIndex = 0
 
-        // Cache for master playlist segments - invalidated explicitly when transcoding completes
-        this.cachedSegments = null
+        // Cache for video list (lightweight metadata) - invalidated when transcoding completes
+        this.cachedVideoList = null
     }
 
     /**
-     * Invalidate the cached master playlist
+     * Invalidate the cached video list
      * Call this when videos are added/removed or transcoding completes
      */
     invalidateCache() {
-        this.cachedSegments = null
+        this.cachedVideoList = null
     }
 
     /**
@@ -70,13 +70,12 @@ class PlaylistManager {
     }
 
     /**
-     * Generate a master playlist that combines all videos in sequence
-     * OPTIMIZED: Uses database for durations, calculates segments mathematically (no disk I/O)
+     * Build video metadata list (lightweight - no segment explosion)
+     * Returns array of {videoIndex, hash, duration, startTime} for transcoded videos
      */
-    generateMasterPlaylist() {
-        const segments = []
+    buildVideoList() {
+        const videos = []
         let totalDuration = 0
-        const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 1
 
         // Get transcoded videos from database with their durations (fast!)
         const db = Database()
@@ -97,27 +96,60 @@ class PlaylistManager {
                 return
             }
 
-            const videoHash = this.getVideoHash(filePath)
-            const videoDuration = video.duration_seconds
+            videos.push({
+                videoIndex: index,
+                hash: this.getVideoHash(filePath),
+                duration: video.duration_seconds,
+                startTime: totalDuration
+            })
 
-            // Calculate segments mathematically based on duration and segment length
-            const numSegments = Math.ceil(videoDuration / segmentLength)
-            let remainingDuration = videoDuration
+            totalDuration += video.duration_seconds
+        })
+
+        return { videos, totalDuration }
+    }
+
+    /**
+     * Generate segments for a specific time window (on-demand, not pre-cached)
+     */
+    getSegmentsInWindow(startOffset, endOffset) {
+        const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 1
+        const { videos, totalDuration } = this.cachedVideoList || this.buildVideoList()
+
+        if (videos.length === 0 || totalDuration === 0) {
+            return []
+        }
+
+        const segments = []
+
+        // Find videos that overlap with our window
+        for (const video of videos) {
+            const videoEnd = video.startTime + video.duration
+
+            // Skip videos entirely before our window
+            if (videoEnd <= startOffset) continue
+            // Stop if we've passed our window
+            if (video.startTime >= endOffset) break
+
+            // Calculate which segments of this video fall in our window
+            const numSegments = Math.ceil(video.duration / segmentLength)
 
             for (let i = 0; i < numSegments; i++) {
-                // Last segment may be shorter
-                const segDuration = Math.min(segmentLength, remainingDuration)
-                totalDuration += segDuration
-                remainingDuration -= segDuration
+                const segStart = video.startTime + (i * segmentLength)
+                const segDuration = Math.min(segmentLength, video.duration - (i * segmentLength))
+                const segEnd = segStart + segDuration
 
-                segments.push({
-                    duration: segDuration,
-                    path: `channels/${this.channel.slug}/videos/${videoHash}/segment_${String(i).padStart(5, '0')}.ts`,
-                    videoIndex: index,
-                    timestamp: totalDuration
-                })
+                // Include segment if it overlaps with window
+                if (segEnd > startOffset && segStart < endOffset) {
+                    segments.push({
+                        duration: segDuration,
+                        path: `channels/${this.channel.slug}/videos/${video.hash}/segment_${String(i).padStart(5, '0')}.ts`,
+                        videoIndex: video.videoIndex,
+                        timestamp: segEnd
+                    })
+                }
             }
-        })
+        }
 
         return segments
     }
@@ -127,52 +159,39 @@ class PlaylistManager {
      * Handles looping by wrapping around to the beginning when near the end
      */
     createRollingPlaylist(offsetSeconds = 0) {
-        // Use cached segments if available (cache is invalidated when transcoding completes)
-        let allSegments = this.cachedSegments
-
-        if (!allSegments) {
-            allSegments = this.generateMasterPlaylist()
-            this.cachedSegments = allSegments
+        // Build/use cached video list (lightweight metadata only)
+        if (!this.cachedVideoList) {
+            this.cachedVideoList = this.buildVideoList()
         }
 
-        if (allSegments.length === 0) {
+        const { videos, totalDuration } = this.cachedVideoList
+
+        if (videos.length === 0 || totalDuration === 0) {
             return '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-ENDLIST\n'
         }
 
-        // Find total duration for looping
-        const totalDuration = allSegments[allSegments.length - 1].timestamp
+        const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 1
 
         // Normalize offset to loop within total duration
         const normalizedOffset = offsetSeconds % totalDuration
 
-        // Find current position in the stream
-        let currentIndex = 0
-        for (let i = 0; i < allSegments.length; i++) {
-            if (allSegments[i].timestamp > normalizedOffset) {
-                currentIndex = i
-                break
-            }
+        // Calculate window: from start of loop to current position + buffer
+        const bufferAhead = 18 * segmentLength  // ~18 segments ahead
+        const windowEnd = Math.min(normalizedOffset + bufferAhead, totalDuration)
+
+        // Get only the segments we need for this window
+        const segmentsInWindow = this.getSegmentsInWindow(0, windowEnd)
+
+        if (segmentsInWindow.length === 0) {
+            return '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-ENDLIST\n'
         }
 
-        // For live TV simulation: playlist should only include "aired" content
-        // HLS.js will seek to the live edge (end of playlist), so we only include
-        // segments from the beginning up to current position + small buffer
-        const bufferAhead = 18  // ~3 minutes buffer ahead of "now"
-        const totalSegments = allSegments.length
-
-        let segmentsInWindow = []
-
-        // Include segments from start of current loop up to current position + buffer
-        const endIndex = Math.min(currentIndex + bufferAhead, totalSegments)
-        for (let i = 0; i < endIndex; i++) {
-            segmentsInWindow.push(allSegments[i])
-        }
-
-        // Calculate sequence number - increases monotonically across loops
+        // Calculate total segments for sequence numbering
+        const totalSegments = Math.ceil(totalDuration / segmentLength)
         const loopCount = Math.floor(offsetSeconds / totalDuration)
         const mediaSequence = loopCount * totalSegments
 
-        // Find max segment duration for TARGETDURATION (HLS spec requires it >= max segment)
+        // Find max segment duration for TARGETDURATION
         const maxDuration = Math.ceil(Math.max(...segmentsInWindow.map(s => s.duration), 2))
 
         // Build playlist for live streaming (no ENDLIST tag)
@@ -184,7 +203,6 @@ class PlaylistManager {
         // Add segments in window, with discontinuity tags at video transitions
         let lastVideoIndex = null
         segmentsInWindow.forEach(segment => {
-            // Add discontinuity tag when transitioning to a different video
             if (lastVideoIndex !== null && segment.videoIndex !== lastVideoIndex) {
                 playlist += '#EXT-X-DISCONTINUITY\n'
             }
@@ -193,7 +211,6 @@ class PlaylistManager {
             playlist += `${segment.path}\n`
         })
 
-        // Don't add EXT-X-ENDLIST or PLAYLIST-TYPE - this tells the player it's a live stream
         return playlist
     }
 
@@ -325,38 +342,27 @@ class PlaylistManager {
      * Playback is continuous and never resets at 3am boundaries
      */
     getSchedule() {
-        const allSegments = this.generateMasterPlaylist()
-        if (allSegments.length === 0) return []
+        // Use cached video list (lightweight, no segment explosion)
+        if (!this.cachedVideoList) {
+            this.cachedVideoList = this.buildVideoList()
+        }
 
-        const totalDuration = allSegments[allSegments.length - 1].timestamp
+        const { videos: videoList, totalDuration } = this.cachedVideoList
+        if (videoList.length === 0 || totalDuration === 0) return []
 
-        // Build a list of videos with their start times (relative to loop start)
-        const videos = []
-        let lastVideoIndex = -1
-        let videoStartTime = 0
-
-        allSegments.forEach((segment, idx) => {
-            if (segment.videoIndex !== lastVideoIndex) {
-                const filePath = this.channel.queue[segment.videoIndex]
-                const videoHash = this.getVideoHash(filePath)
-                const displayName = this.getVideoDisplayName(filePath)
-
-                videos.push({
-                    videoIndex: segment.videoIndex,
-                    displayName: displayName,
-                    startTime: videoStartTime,
-                    duration: 0,
-                    hash: videoHash
-                })
-                lastVideoIndex = segment.videoIndex
+        // Build schedule-friendly video list with display names
+        const videos = videoList.map(v => {
+            const filePath = this.channel.queue[v.videoIndex]
+            return {
+                videoIndex: v.videoIndex,
+                displayName: this.getVideoDisplayName(filePath),
+                startTime: v.startTime,
+                duration: v.duration,
+                hash: v.hash
             }
-            // Track duration
-            if (videos.length > 0) {
-                videos[videos.length - 1].duration += segment.duration
-            }
-            videoStartTime = segment.timestamp
         })
 
+        const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 1
         const now = Date.now()
         const dayStart = this.getPrevious3am()
         const dayEnd = this.getNext3am()
@@ -366,11 +372,8 @@ class PlaylistManager {
         const normalizedOffset = currentOffset % totalDuration
 
         // Calculate buffer offset to match what the player actually shows
-        // The playlist includes bufferAhead segments past "now", and HLS.js seeks to live edge
-        // So the player is actually showing content from ~bufferAhead segments in the future
         const bufferAheadSegments = 18 // Must match createRollingPlaylist
-        const avgSegmentDuration = totalDuration / allSegments.length
-        const bufferOffsetMs = bufferAheadSegments * avgSegmentDuration * 1000
+        const bufferOffsetMs = bufferAheadSegments * segmentLength * 1000
         const playerTime = now + bufferOffsetMs
 
         // Calculate the loop start time (when the current loop began)
