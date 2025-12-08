@@ -51,6 +51,7 @@ class DatabaseManager {
                 transcoded BOOLEAN DEFAULT 0,
                 transcoded_at DATETIME,
                 duration_seconds REAL,
+                segment_count INTEGER,
                 video_codec TEXT,
                 audio_codec TEXT,
                 width INTEGER,
@@ -75,6 +76,14 @@ class DatabaseManager {
             CREATE INDEX IF NOT EXISTS idx_channels_slug
                 ON channels(slug);
         `)
+
+        // Add segment_count column if it doesn't exist (migration for existing DBs)
+        try {
+            this.db.exec(`ALTER TABLE videos ADD COLUMN segment_count INTEGER`)
+            Log(tag, 'Added segment_count column to videos table')
+        } catch (e) {
+            // Column already exists, ignore
+        }
     }
 
     /**
@@ -118,19 +127,20 @@ class DatabaseManager {
     /**
      * Update video transcoding status
      */
-    markVideoTranscoded(hash, durationSeconds, videoCodec, audioCodec, width, height) {
+    markVideoTranscoded(hash, durationSeconds, segmentCount, videoCodec, audioCodec, width, height) {
         const stmt = this.db.prepare(`
             UPDATE videos SET
                 transcoded = 1,
                 transcoded_at = CURRENT_TIMESTAMP,
                 duration_seconds = ?,
+                segment_count = ?,
                 video_codec = ?,
                 audio_codec = ?,
                 width = ?,
                 height = ?
             WHERE hash = ?
         `)
-        return stmt.run(durationSeconds, videoCodec, audioCodec, width, height, hash)
+        return stmt.run(durationSeconds, segmentCount, videoCodec, audioCodec, width, height, hash)
     }
 
     /**

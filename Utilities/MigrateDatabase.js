@@ -95,26 +95,26 @@ function migrateAll() {
 }
 
 /**
- * Backfill missing durations for already-transcoded videos
- * This reads the m3u8 files to get accurate durations
+ * Backfill missing durations and segment counts for already-transcoded videos
+ * This reads the m3u8 files to get accurate data
  */
 function backfillDurations() {
     const db = Database()
 
-    // Find all transcoded videos with NULL duration
+    // Find all transcoded videos with NULL duration OR NULL segment_count
     const videos = db.db.prepare(`
         SELECT v.*, c.slug as channel_slug
         FROM videos v
         JOIN channels c ON v.channel_id = c.id
-        WHERE v.transcoded = 1 AND v.duration_seconds IS NULL
+        WHERE v.transcoded = 1 AND (v.duration_seconds IS NULL OR v.segment_count IS NULL)
     `).all()
 
     if (videos.length === 0) {
-        Log(tag, 'No videos need duration backfill')
+        Log(tag, 'No videos need duration/segment backfill')
         return 0
     }
 
-    Log(tag, `Backfilling durations for ${videos.length} videos...`)
+    Log(tag, `Backfilling durations/segments for ${videos.length} videos...`)
 
     let updated = 0
     videos.forEach(video => {
@@ -129,16 +129,18 @@ function backfillDurations() {
         try {
             const playlistContent = fs.readFileSync(playlistPath, 'utf8')
             let duration = 0
+            let segmentCount = 0
 
             playlistContent.split('\n').forEach(line => {
                 if (line.startsWith('#EXTINF:')) {
                     const match = line.match(/#EXTINF:([\d.]+)/)
                     if (match) duration += parseFloat(match[1])
+                    segmentCount++
                 }
             })
 
-            if (duration > 0) {
-                db.db.prepare('UPDATE videos SET duration_seconds = ? WHERE id = ?').run(duration, video.id)
+            if (duration > 0 && segmentCount > 0) {
+                db.db.prepare('UPDATE videos SET duration_seconds = ?, segment_count = ? WHERE id = ?').run(duration, segmentCount, video.id)
                 updated++
             }
         } catch (err) {
@@ -146,7 +148,7 @@ function backfillDurations() {
         }
     })
 
-    Log(tag, `Backfilled durations for ${updated} videos`)
+    Log(tag, `Backfilled durations/segments for ${updated} videos`)
     return updated
 }
 

@@ -451,14 +451,16 @@ class PreGenerator {
                     const duration = (Date.now() - startTime) / 1000
                     Log(tag, `Generated ${path.basename(filePath)} in ${duration.toFixed(1)}s [${this.currentIndex}/${this.totalVideos}]`, channel)
 
-                    // Get video duration from the generated playlist
+                    // Get video duration and segment count from the generated playlist
                     let videoDuration = 0
+                    let segmentCount = 0
                     try {
                         const playlistContent = fs.readFileSync(outputPath, 'utf8')
                         playlistContent.split('\n').forEach(line => {
                             if (line.startsWith('#EXTINF:')) {
                                 const match = line.match(/#EXTINF:([\d.]+)/)
                                 if (match) videoDuration += parseFloat(match[1])
+                                segmentCount++
                             }
                         })
                     } catch (e) {
@@ -470,7 +472,8 @@ class PreGenerator {
                         originalPath: filePath,
                         videoHash: videoHash,
                         generatedAt: new Date().toISOString(),
-                        duration: duration
+                        duration: duration,
+                        segmentCount: segmentCount
                     }
                     fs.writeFileSync(
                         path.join(outputDir, 'metadata.json'),
@@ -483,6 +486,7 @@ class PreGenerator {
                         db.markVideoTranscoded(
                             videoHash,
                             videoDuration,
+                            segmentCount,
                             videoInfo.codec,
                             videoInfo.audioCodec,
                             parseInt(videoInfo.width) || null,

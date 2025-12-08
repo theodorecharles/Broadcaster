@@ -71,7 +71,7 @@ class PlaylistManager {
 
     /**
      * Build video metadata list (lightweight - no segment explosion)
-     * Returns array of {videoIndex, hash, duration, startTime} for transcoded videos
+     * Returns array of {videoIndex, hash, duration, segmentCount, startTime} for transcoded videos
      */
     buildVideoList() {
         const videos = []
@@ -91,8 +91,8 @@ class PlaylistManager {
         this.channel.queue.forEach((filePath, index) => {
             const video = transcodedMap.get(filePath)
 
-            // Skip if not transcoded
-            if (!video || !video.duration_seconds) {
+            // Skip if not transcoded or missing segment count
+            if (!video || !video.duration_seconds || !video.segment_count) {
                 return
             }
 
@@ -100,6 +100,7 @@ class PlaylistManager {
                 videoIndex: index,
                 hash: this.getVideoHash(filePath),
                 duration: video.duration_seconds,
+                segmentCount: video.segment_count,
                 startTime: totalDuration
             })
 
@@ -113,7 +114,6 @@ class PlaylistManager {
      * Generate segments for a specific time window (on-demand, not pre-cached)
      */
     getSegmentsInWindow(startOffset, endOffset) {
-        const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 1
         const { videos, totalDuration } = this.cachedVideoList || this.buildVideoList()
 
         if (videos.length === 0 || totalDuration === 0) {
@@ -131,12 +131,16 @@ class PlaylistManager {
             // Stop if we've passed our window
             if (video.startTime >= endOffset) break
 
-            // Calculate which segments of this video fall in our window
-            const numSegments = Math.ceil(video.duration / segmentLength)
+            // Use actual segment count from database, calculate average segment duration
+            const numSegments = video.segmentCount
+            const avgSegmentDuration = video.duration / numSegments
 
             for (let i = 0; i < numSegments; i++) {
-                const segStart = video.startTime + (i * segmentLength)
-                const segDuration = Math.min(segmentLength, video.duration - (i * segmentLength))
+                const segStart = video.startTime + (i * avgSegmentDuration)
+                // Last segment gets remaining duration to avoid rounding errors
+                const segDuration = (i === numSegments - 1)
+                    ? (video.duration - (i * avgSegmentDuration))
+                    : avgSegmentDuration
                 const segEnd = segStart + segDuration
 
                 // Include segment if it overlaps with window
@@ -170,13 +174,14 @@ class PlaylistManager {
             return '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-ENDLIST\n'
         }
 
-        const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 1
+        // Calculate average segment duration from first video (they should all be similar)
+        const avgSegmentDuration = videos[0].duration / videos[0].segmentCount
 
         // Normalize offset to loop within total duration
         const normalizedOffset = offsetSeconds % totalDuration
 
         // Calculate window: from start of loop to current position + buffer
-        const bufferAhead = 18 * segmentLength  // ~18 segments ahead
+        const bufferAhead = 18 * avgSegmentDuration  // ~18 segments ahead
         const windowEnd = Math.min(normalizedOffset + bufferAhead, totalDuration)
 
         // Get only the segments we need for this window
@@ -186,8 +191,8 @@ class PlaylistManager {
             return '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-ENDLIST\n'
         }
 
-        // Calculate total segments for sequence numbering
-        const totalSegments = Math.ceil(totalDuration / segmentLength)
+        // Calculate total segments for sequence numbering (sum of all video segment counts)
+        const totalSegments = videos.reduce((sum, v) => sum + v.segmentCount, 0)
         const loopCount = Math.floor(offsetSeconds / totalDuration)
         const mediaSequence = loopCount * totalSegments
 
