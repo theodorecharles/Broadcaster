@@ -2,7 +2,7 @@ require('dotenv').config({ path: `./config.txt` })
 const ChannelPool = require('./Utilities/ChannelPool.js')
 const { Channel, initQueueCache, saveAllQueues } = require('./Classes/Channel.js')
 const PreGenerator = require('./Utilities/PreGenerator.js')
-const { migrateAll } = require('./Utilities/MigrateDatabase.js')
+const { migrateAll, backfillDurations } = require('./Utilities/MigrateDatabase.js')
 const Log = require('./Utilities/Log.js')
 const tag = "Main"
 const fs = require('fs')
@@ -96,6 +96,7 @@ async function startup() {
   Log(tag, 'Migrating existing transcoded videos to database (background)...')
   setImmediate(async () => {
     migrateAll()
+    backfillDurations()
 
     // After migration, queue channels asynchronously (don't block event loop!)
     Log(tag, 'Checking for pre-generated HLS streams...')

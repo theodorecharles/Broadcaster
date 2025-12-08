@@ -4,7 +4,7 @@ const crypto = require('crypto')
 const Log = require('../Utilities/Log.js')
 const Database = require('../Utilities/Database.js')
 const tag = 'PlaylistManager'
-const { CACHE_DIR } = process.env
+const { CACHE_DIR, HLS_SEGMENT_LENGTH_SECONDS } = process.env
 
 class PlaylistManager {
 
@@ -71,69 +71,51 @@ class PlaylistManager {
 
     /**
      * Generate a master playlist that combines all videos in sequence
-     * OPTIMIZED: Uses database to filter transcoded videos before filesystem access
+     * OPTIMIZED: Uses database for durations, calculates segments mathematically (no disk I/O)
      */
     generateMasterPlaylist() {
         const segments = []
         let totalDuration = 0
+        const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 1
 
-        // Get transcoded videos from database (fast!)
+        // Get transcoded videos from database with their durations (fast!)
         const db = Database()
         const transcodedVideos = db.getChannelVideos(this.channel.slug, true)
-        const transcodedSet = new Set(transcodedVideos.map(v => v.file_path))
 
-        // Build lookup for queue index
-        const queueIndexMap = new Map()
-        this.channel.queue.forEach((filePath, index) => {
-            queueIndexMap.set(filePath, index)
+        // Build lookup map: filePath -> video record
+        const transcodedMap = new Map()
+        transcodedVideos.forEach(v => {
+            transcodedMap.set(v.file_path, v)
         })
 
         // Only process videos that are both in queue AND transcoded
         this.channel.queue.forEach((filePath, index) => {
-            // Skip if not transcoded (database check is fast)
-            if (!transcodedSet.has(filePath)) {
+            const video = transcodedMap.get(filePath)
+
+            // Skip if not transcoded
+            if (!video || !video.duration_seconds) {
                 return
             }
 
             const videoHash = this.getVideoHash(filePath)
-            const playlistPath = this.getVideoPlaylistPath(filePath)
+            const videoDuration = video.duration_seconds
 
-            // Final verification: check if playlist exists and is complete
-            if (!fs.existsSync(playlistPath)) {
-                return
-            }
+            // Calculate segments mathematically based on duration and segment length
+            const numSegments = Math.ceil(videoDuration / segmentLength)
+            let remainingDuration = videoDuration
 
-            try {
-                const content = fs.readFileSync(playlistPath, 'utf8')
+            for (let i = 0; i < numSegments; i++) {
+                // Last segment may be shorter
+                const segDuration = Math.min(segmentLength, remainingDuration)
+                totalDuration += segDuration
+                remainingDuration -= segDuration
 
-                // Only include fully transcoded videos (must have ENDLIST marker)
-                if (!content.includes('#EXT-X-ENDLIST')) {
-                    return
-                }
-
-                const lines = content.split('\n')
-
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i].trim()
-
-                    if (line.startsWith('#EXTINF:')) {
-                        const duration = this.parseSegmentDuration(line)
-                        totalDuration += duration
-
-                        // Next line should be the segment filename
-                        const segmentFile = lines[i + 1]?.trim()
-                        if (segmentFile && !segmentFile.startsWith('#')) {
-                            segments.push({
-                                duration: duration,
-                                path: `channels/${this.channel.slug}/videos/${videoHash}/${segmentFile}`,
-                                videoIndex: index,
-                                timestamp: totalDuration
-                            })
-                        }
-                    }
-                }
-            } catch (err) {
-                Log(tag, `Error processing ${filePath}: ${err.message}`, this.channel)
+                segments.push({
+                    duration: segDuration,
+                    path: `channels/${this.channel.slug}/videos/${videoHash}/segment_${String(i).padStart(5, '0')}.ts`,
+                    videoIndex: index,
+                    timestamp: totalDuration
+                })
             }
         })
 

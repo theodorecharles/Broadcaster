@@ -94,7 +94,64 @@ function migrateAll() {
     Log(tag, `Migration complete! ${totalMigrated} videos marked as transcoded`)
 }
 
+/**
+ * Backfill missing durations for already-transcoded videos
+ * This reads the m3u8 files to get accurate durations
+ */
+function backfillDurations() {
+    const db = Database()
+
+    // Find all transcoded videos with NULL duration
+    const videos = db.db.prepare(`
+        SELECT v.*, c.slug as channel_slug
+        FROM videos v
+        JOIN channels c ON v.channel_id = c.id
+        WHERE v.transcoded = 1 AND v.duration_seconds IS NULL
+    `).all()
+
+    if (videos.length === 0) {
+        Log(tag, 'No videos need duration backfill')
+        return 0
+    }
+
+    Log(tag, `Backfilling durations for ${videos.length} videos...`)
+
+    let updated = 0
+    videos.forEach(video => {
+        const videoDir = path.join(CACHE_DIR, 'channels', video.channel_slug, 'videos', video.hash)
+        const playlistPath = path.join(videoDir, 'index.m3u8')
+
+        if (!fs.existsSync(playlistPath)) {
+            Log(tag, `Playlist not found for ${video.filename}, skipping`)
+            return
+        }
+
+        try {
+            const playlistContent = fs.readFileSync(playlistPath, 'utf8')
+            let duration = 0
+
+            playlistContent.split('\n').forEach(line => {
+                if (line.startsWith('#EXTINF:')) {
+                    const match = line.match(/#EXTINF:([\d.]+)/)
+                    if (match) duration += parseFloat(match[1])
+                }
+            })
+
+            if (duration > 0) {
+                db.db.prepare('UPDATE videos SET duration_seconds = ? WHERE id = ?').run(duration, video.id)
+                updated++
+            }
+        } catch (err) {
+            Log(tag, `Error reading playlist for ${video.filename}: ${err.message}`)
+        }
+    })
+
+    Log(tag, `Backfilled durations for ${updated} videos`)
+    return updated
+}
+
 module.exports = {
     migrateExistingVideos,
-    migrateAll
+    migrateAll,
+    backfillDurations
 }
