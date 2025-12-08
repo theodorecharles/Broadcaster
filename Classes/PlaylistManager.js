@@ -180,14 +180,12 @@ class PlaylistManager {
         // Normalize offset to loop within total duration
         const normalizedOffset = offsetSeconds % totalDuration
 
-        // Calculate window: just around current position (no past segments needed)
-        const bufferBehind = 3 * avgSegmentDuration  // ~3 segments behind for safety
+        // Calculate window: from start of loop to current position + buffer
         const bufferAhead = 18 * avgSegmentDuration  // ~18 segments ahead
-        const windowStart = Math.max(0, normalizedOffset - bufferBehind)
         const windowEnd = Math.min(normalizedOffset + bufferAhead, totalDuration)
 
         // Get only the segments we need for this window
-        const segmentsInWindow = this.getSegmentsInWindow(windowStart, windowEnd)
+        const segmentsInWindow = this.getSegmentsInWindow(0, windowEnd)
 
         if (segmentsInWindow.length === 0) {
             return '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-ENDLIST\n'
