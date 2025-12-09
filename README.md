@@ -1,13 +1,19 @@
 # Broadcaster
-Generate and host HTTP Live Streams from local video content using FFMpeg. Broadcaster will create playlists of your video files and live stream the playlist. It will orchestrate time keeping to make sure anyone watching your stream is in the same position. If no one is watching, the timeline keeps going, just like a old school TV stations.
+Generate and host HTTP Live Streams from local video content using FFMpeg. Broadcaster will create playlists of your video files and live stream the playlist. It will orchestrate time keeping to make sure anyone watching your stream is in the same position. If no one is watching, the timeline keeps going, just like old school TV stations.
 
-# Prerequisites
+## How It Works
+
+Broadcaster pre-generates HLS segments for all your videos on first startup. This transcoding process runs in the background and can take a while depending on your library size and hardware. Once transcoded, videos are cached and don't need to be re-encoded on subsequent startups.
+
+The web UI is available immediately at startup, but channels won't appear until at least one video has been transcoded. You can monitor transcoding progress in the Docker logs or console output.
+
+## Prerequisites
 * Broadcaster uses FFMpeg to encode your videos to h264 for HTTP Live Streaming.
 * If you have an Nvidia GPU, it is highly recommended you have `ffmpeg` compiled with Nvidia's non-free `h264_nvenc` codec.
 * If you have an Intel CPU with Intel QuickSync, you can try the `h264_qsv` codec.
-* Without either of these, you'll have to use a software codec like `libx264` which may not be able to keep up in real time. You can set the codec in the config.txt.
+* Without either of these, you'll have to use a software codec like `libx264` which will be slower. You can set the codec in the config.txt.
 
-# Getting Started
+## Getting Started
 
 Clone the repository:
 ```
@@ -21,25 +27,44 @@ npm install
 ```
 
 Define your channels in a `channels.json` file:
-```
+```json
 [{
   "type": "shuffle",
   "name": "My Channel",
   "slug": "mychannel",
   "paths": [
-    "/path/to/videos.mkv"
+    "/path/to/videos"
   ]
 }]
-``` 
+```
 
 The `type` specifies the playlist type:
 * `shuffle`: will shuffle the files and play them in a random order.
 * `alphabetical`: will play the files back in alphabetical order.
-* `tv`: will look for S##E## codes in the file name and create a playlist cycling through shows, starting each of them from the first episode. Provide paths for multiple TV shows to use this. Not implemented yet, other ideas exist as well such as cadence/daily scheduling.
 
-The `name` is a human readable name for the channel and the `slug` specifies the directory name the channel use.
+The `name` is a human readable name for the channel and the `slug` specifies the directory name the channel will use.
 
 Start your server:
 ```
 npm start
 ```
+
+## Monitoring Progress
+
+On first run, Broadcaster will transcode all videos in your library. Monitor progress with:
+
+```bash
+# Docker
+docker logs -f broadcaster
+
+# Or if running directly
+npm start
+```
+
+You'll see output like:
+```
+[PreGenerator] Transcoding: My Video.mkv (1/50)
+[PreGenerator] Transcoding complete: My Video.mkv
+```
+
+Channels will appear in the web UI as their videos finish transcoding.
