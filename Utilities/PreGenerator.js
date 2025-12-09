@@ -180,10 +180,12 @@ class PreGenerator {
             Log(tag, `Error loading manifest: ${err.message}`, channel)
         }
 
-        // Build set of current video hashes from queue
+        // Build set of current video hashes from database
+        const db = Database()
+        const allVideos = db.getChannelVideos(channel.slug, false)
         const currentHashes = new Set()
-        channel.queue.forEach(filePath => {
-            currentHashes.add(this.getVideoHash(filePath))
+        allVideos.forEach(video => {
+            currentHashes.add(this.getVideoHash(video.file_path))
         })
 
         // Find and remove videos that are no longer in the queue
@@ -212,12 +214,12 @@ class PreGenerator {
 
         // Add new videos to manifest
         let added = 0
-        channel.queue.forEach(filePath => {
-            const videoHash = this.getVideoHash(filePath)
+        allVideos.forEach(video => {
+            const videoHash = this.getVideoHash(video.file_path)
             if (!manifest[videoHash]) {
                 manifest[videoHash] = {
-                    originalPath: filePath,
-                    filename: path.basename(filePath, path.extname(filePath)),
+                    originalPath: video.file_path,
+                    filename: path.basename(video.file_path, path.extname(video.file_path)),
                     addedAt: Date.now()
                 }
                 added++
