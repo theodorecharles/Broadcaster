@@ -270,23 +270,23 @@ class PreGenerator {
         this.pendingManifestUpdates = this.pendingManifestUpdates || []
         this.pendingManifestUpdates.push(channel)
 
-        // Get all transcoded videos in one query (FAST!)
+        // Get all videos from database - both transcoded and not
         const db = Database()
-        const transcodedVideos = db.getChannelVideos(channel.slug, true)
+        const allVideos = db.getChannelVideos(channel.slug, false) // all videos
+        const transcodedVideos = db.getChannelVideos(channel.slug, true) // transcoded only
         const transcodedPaths = new Set(transcodedVideos.map(v => v.file_path))
 
         const channelQueue = []
         let skippedCount = 0
 
-        channel.queue.forEach(filePath => {
+        allVideos.forEach(video => {
             // Fast Set lookup instead of database query per video
-            // Trust the database - filesystem verification only happens when actually transcoding
-            if (transcodedPaths.has(filePath)) {
+            if (transcodedPaths.has(video.file_path)) {
                 skippedCount++
             } else {
-                // Not in database, needs transcoding
+                // Not transcoded yet, needs transcoding
                 channelQueue.push({
-                    filePath,
+                    filePath: video.file_path,
                     channel
                 })
             }
