@@ -415,6 +415,38 @@ function App() {
     return remainMins > 0 ? `${hours}h ${remainMins}m` : `${hours}h`
   }
 
+  // Combine consecutive short shows (< 20 min) with the same title for display
+  const combineShortShows = (schedule) => {
+    const SHORT_THRESHOLD = 20 * 60 // 20 minutes in seconds
+    const combined = []
+
+    for (let i = 0; i < schedule.length; i++) {
+      const show = schedule[i]
+
+      // If this is a short show, try to merge with following short shows of same title
+      if (show.duration < SHORT_THRESHOLD) {
+        let merged = { ...show }
+        let j = i + 1
+
+        while (j < schedule.length &&
+               schedule[j].title === merged.title &&
+               schedule[j].duration < SHORT_THRESHOLD) {
+          merged.endTime = schedule[j].endTime
+          merged.duration += schedule[j].duration
+          merged.isCurrent = merged.isCurrent || schedule[j].isCurrent
+          j++
+        }
+
+        combined.push(merged)
+        i = j - 1 // Skip merged entries
+      } else {
+        combined.push(show)
+      }
+    }
+
+    return combined
+  }
+
   // Sync vertical scroll between channel list and schedule
   const channelsRef = useRef(null)
   const handleScheduleScroll = (e) => {
@@ -624,9 +656,10 @@ function App() {
                     )}
                     {guideData.channels && Object.entries(guideData.channels).map(([slug, channelData]) => {
                       const pxPerMin = isMobile ? 5 : 10 // 50% scale on mobile
+                      const combinedSchedule = combineShortShows(channelData.schedule)
                       return (
                       <div key={slug} className="guide-channel-row">
-                        {channelData.schedule.map((show, idx) => {
+                        {combinedSchedule.map((show, idx) => {
                           const now = Date.now()
                           const isCurrent = show.startTime <= now && show.endTime > now
                           return (
