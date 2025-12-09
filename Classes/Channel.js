@@ -33,41 +33,6 @@ function shuffleArray(array) {
   return array
 }
 
-// Check if a valid guide exists for the current day period (3am-3am)
-function hasValidGuideForToday() {
-  const historyDir = path.join(CACHE_DIR, 'history')
-
-  if (!fs.existsSync(historyDir)) {
-    return false
-  }
-
-  try {
-    const files = fs.readdirSync(historyDir)
-      .filter(f => f.startsWith('guide-') && f.endsWith('.json'))
-      .sort()
-      .reverse()
-
-    if (files.length === 0) {
-      return false
-    }
-
-    const latestFile = files[0]
-    const filePath = path.join(historyDir, latestFile)
-    const guide = JSON.parse(fs.readFileSync(filePath, 'utf8'))
-
-    const now = new Date()
-    const today3am = new Date(now)
-    today3am.setHours(3, 0, 0, 0)
-    if (now.getHours() < 3) {
-      today3am.setDate(today3am.getDate() - 1)
-    }
-
-    return guide.dayStart && guide.dayStart === today3am.getTime()
-  } catch (err) {
-    return false
-  }
-}
-
 // Path to cache file for channel queues
 function getQueueCachePath() {
   return path.join(CACHE_DIR, 'queue-cache.json')
@@ -168,14 +133,11 @@ function Channel(definition) {
   this.startTime = null
   this.started = false
 
-  // Check if we have a valid guide - if so, don't reshuffle (preserve sync with guide)
-  const guideExists = hasValidGuideForToday()
-
   // Check if we have cached queue data for this channel
   if (queueCacheData && queueCacheData[this.slug]) {
     this.queue = queueCacheData[this.slug]
     Log(tag, `Loaded ${this.queue.length} files from cache`, this)
-    // Don't reshuffle if guide exists - the cached order matches the guide
+    // Queue cache exists - order is preserved, guide will match
   } else {
     // No cache - scan filesystem
     Log(tag, `Scanning filesystem...`, this)
@@ -193,8 +155,9 @@ function Channel(definition) {
       Log(tag, `Found ${x} supported files in ${dirPath}`, this)
     })
 
-    // Only shuffle when building queue fresh AND no existing guide
-    if (definition.type == 'shuffle' && !guideExists) {
+    // No queue cache means we need to shuffle (for shuffle channels)
+    // Any existing guide is now invalid since queue order changed
+    if (definition.type == 'shuffle') {
       shuffleArray(this.queue)
     }
   }

@@ -410,6 +410,7 @@ class PlaylistManager {
                 if (videoEndMs > dayStart && videoStartMs < dayEnd) {
                     schedule.push({
                         title: video.displayName,
+                        hash: video.hash,
                         startTime: videoStartMs,
                         endTime: videoEndMs,
                         duration: video.duration,

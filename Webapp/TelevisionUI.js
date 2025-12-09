@@ -78,6 +78,14 @@ function loadGuideFromHistory() {
         }
 
         if (guide.dayStart && guide.dayStart === today3am.getTime()) {
+            // Check if guide has hash field (required for queue reconstruction)
+            const firstChannel = Object.values(guide.channels)[0]
+            const firstShow = firstChannel?.schedule?.[0]
+            if (!firstShow?.hash) {
+                Log('TelevisionUI', `Guide missing hash field, will regenerate`)
+                return null
+            }
+
             Log('TelevisionUI', `Loaded guide from history: ${latestFile}`)
             return guide
         }
