@@ -163,8 +163,12 @@ class DatabaseManager {
     /**
      * Get video by hash
      */
-    getVideoByHash(hash) {
-        return this.db.prepare('SELECT * FROM videos WHERE hash = ?').get(hash)
+    getVideoByHash(channelSlug, hash) {
+        return this.db.prepare(`
+            SELECT v.* FROM videos v
+            JOIN channels c ON v.channel_id = c.id
+            WHERE c.slug = ? AND v.hash = ?
+        `).get(channelSlug, hash)
     }
 
     /**

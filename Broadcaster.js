@@ -1,6 +1,6 @@
 require('dotenv').config({ path: `./config.txt` })
 const ChannelPool = require('./Utilities/ChannelPool.js')
-const { Channel, initQueueCache, saveAllQueues } = require('./Classes/Channel.js')
+const { Channel } = require('./Classes/Channel.js')
 const PreGenerator = require('./Utilities/PreGenerator.js')
 const { migrateAll, backfillDurations } = require('./Utilities/MigrateDatabase.js')
 const Log = require('./Utilities/Log.js')
@@ -56,13 +56,8 @@ function loadChannels() {
 }
 
 // Initialize channels from config
-function initializeChannels(channelDefinitions, useCache = true) {
+function initializeChannels(channelDefinitions) {
   try {
-    // Initialize queue cache before creating channels
-    if (useCache) {
-      initQueueCache(channelsPath)
-    }
-
     channelDefinitions.forEach(definition => {
       const channel = new Channel(definition)
       ChannelPool().addChannel(channel)
@@ -93,11 +88,11 @@ async function startup() {
     migrateAll()
     backfillDurations()
 
-    // Invalidate all playlist caches so they pick up any backfilled data
-    Log(tag, 'Invalidating playlist caches after migration...')
+    // Invalidate all guide caches so they pick up any backfilled data
+    Log(tag, 'Invalidating guide caches after migration...')
     ChannelPool().queue.forEach(channel => {
-      if (channel.playlistManager) {
-        channel.playlistManager.invalidateCache()
+      if (channel.guideGenerator) {
+        channel.guideGenerator.invalidateCache()
       }
     })
 
@@ -113,13 +108,10 @@ async function startup() {
       }))
     }
 
-    // Start broadcast immediately - channels will play whatever content is ready
-    // Guide and playlist automatically exclude videos that aren't transcoded yet
+    // Start broadcast - channels will play whatever content is ready
+    // Guide determines what plays, playlist serves segments based on guide
     ChannelPool().startBroadcast()
     Log(tag, 'Broadcast started - transcoding continues in background')
-
-    // Save queue cache with start times (after channels are started)
-    saveAllQueues(ChannelPool().queue)
 
     // Generate remaining streams in background
     PreGenerator.startGeneration().then(() => {

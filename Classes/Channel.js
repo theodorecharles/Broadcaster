@@ -1,11 +1,11 @@
 const Format = require('../Utilities/FormatValidator.js')
 const { PlaylistManager } = require('./PlaylistManager.js')
+const { GuideGenerator } = require('../Utilities/GuideGenerator.js')
 const Log = require('../Utilities/Log.js')
 const Database = require('../Utilities/Database.js')
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
-const { CACHE_DIR } = process.env
 const tag = 'Channel'
 
 // Recursively find all files in a directory
@@ -24,162 +24,30 @@ function findFiles(dir, fileList = []) {
   return fileList
 }
 
-// Fisher-Yates shuffle for uniform randomization
-function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]]
-  }
-  return array
-}
-
-// Path to cache file for channel queues
-function getQueueCachePath() {
-  return path.join(CACHE_DIR, 'queue-cache.json')
-}
-
-// Load cached queues if channels.json hasn't changed
-function loadQueueCache(channelsJsonHash) {
-  try {
-    const cachePath = getQueueCachePath()
-    if (!fs.existsSync(cachePath)) return null
-
-    const cache = JSON.parse(fs.readFileSync(cachePath, 'utf8'))
-    if (cache.channelsHash !== channelsJsonHash) {
-      Log(tag, 'channels.json changed, will rescan filesystem')
-      return null
-    }
-
-    Log(tag, 'Using cached queue data (channels.json unchanged)')
-    return {
-      queues: cache.queues,
-      startTimes: cache.startTimes || {}
-    }
-  } catch (e) {
-    Log(tag, `Could not load queue cache: ${e.message}`)
-    return null
-  }
-}
-
-// Save queue cache with channels.json hash and start times
-function saveQueueCache(channelsJsonHash, queues, startTimes) {
-  try {
-    const cachePath = getQueueCachePath()
-    const cacheDir = path.dirname(cachePath)
-    if (!fs.existsSync(cacheDir)) {
-      fs.mkdirSync(cacheDir, { recursive: true })
-    }
-
-    fs.writeFileSync(cachePath, JSON.stringify({
-      channelsHash: channelsJsonHash,
-      queues: queues,
-      startTimes: startTimes,
-      savedAt: Date.now()
-    }, null, 2))
-  } catch (e) {
-    Log(tag, `Could not save queue cache: ${e.message}`)
-  }
-}
-
-// Compute hash of channels.json content
-function hashChannelsJson(channelsPath) {
-  try {
-    const content = fs.readFileSync(channelsPath, 'utf8')
-    return crypto.createHash('md5').update(content).digest('hex')
-  } catch (e) {
-    return null
-  }
-}
-
-// Module-level cache for queue loading
-let queueCacheLoaded = false
-let queueCacheData = null
-let startTimesData = null
-let channelsHash = null
-
-// Initialize queue cache - call this once before creating channels
-function initQueueCache(channelsPath) {
-  if (queueCacheLoaded) return
-
-  channelsHash = hashChannelsJson(channelsPath)
-  if (channelsHash) {
-    const cache = loadQueueCache(channelsHash)
-    if (cache) {
-      queueCacheData = cache.queues
-      startTimesData = cache.startTimes
-    }
-  }
-  queueCacheLoaded = true
-}
-
-// Save all channel queues and start times to cache - call after all channels are started
-function saveAllQueues(channels) {
-  if (!channelsHash) return
-
-  const queues = {}
-  const startTimes = {}
-  channels.forEach(channel => {
-    queues[channel.slug] = channel.queue
-    if (channel.startTime) {
-      startTimes[channel.slug] = channel.startTime
-    }
-  })
-  saveQueueCache(channelsHash, queues, startTimes)
-  Log(tag, `Saved queue cache for ${channels.length} channels`)
-}
-
-// Reset the cache state (for reloads)
-function resetQueueCache() {
-  queueCacheLoaded = false
-  queueCacheData = null
-  startTimesData = null
-  channelsHash = null
-}
-
 function Channel(definition) {
 
   this.type = definition.type
   this.name = definition.name
   this.slug = definition.slug
   this.paths = definition.paths
-  this.queue = []
-  this.playlistManager = null
-  this.startTime = null
   this.started = false
 
-  // Check if we have cached queue data for this channel
-  if (queueCacheData && queueCacheData[this.slug]) {
-    this.queue = queueCacheData[this.slug]
-    // Restore cached start time so schedule stays consistent across restarts
-    if (startTimesData && startTimesData[this.slug]) {
-      this.startTime = startTimesData[this.slug]
-      Log(tag, `Loaded ${this.queue.length} files from cache, restored start time`, this)
-    } else {
-      Log(tag, `Loaded ${this.queue.length} files from cache`, this)
-    }
-  } else {
-    // No cache - scan filesystem
-    Log(tag, `Scanning filesystem...`, this)
+  // Scan filesystem for videos
+  Log(tag, `Scanning filesystem...`, this)
+  const allFiles = []
 
-    definition.paths.forEach(dirPath => {
-      var x = 0
-      const files = findFiles(dirPath)
+  definition.paths.forEach(dirPath => {
+    let count = 0
+    const files = findFiles(dirPath)
 
-      files.forEach(file => {
-        if (Format.isSupported(file)) {
-          this.queue.push(file)
-          x++
-        }
-      })
-      Log(tag, `Found ${x} supported files in ${dirPath}`, this)
+    files.forEach(file => {
+      if (Format.isSupported(file)) {
+        allFiles.push(file)
+        count++
+      }
     })
-
-    // No queue cache means we need to shuffle (for shuffle channels)
-    // Any existing guide is now invalid since queue order changed
-    if (definition.type == 'shuffle') {
-      shuffleArray(this.queue)
-    }
-  }
+    Log(tag, `Found ${count} supported files in ${dirPath}`, this)
+  })
 
   // Register channel and videos in database
   const db = Database()
@@ -187,7 +55,7 @@ function Channel(definition) {
 
   // Add all videos to database
   let addedCount = 0
-  this.queue.forEach(filePath => {
+  allFiles.forEach(filePath => {
     const hash = crypto.createHash('md5').update(filePath).digest('hex')
     const filename = path.basename(filePath, path.extname(filePath))
     const result = db.insertVideo(channelId, filePath, hash, filename)
@@ -196,47 +64,42 @@ function Channel(definition) {
     }
   })
 
-  // Clean up videos that are no longer in the queue
-  const deletedHashes = db.deleteRemovedVideos(this.slug, this.queue)
+  // Clean up videos that are no longer on disk
+  const deletedHashes = db.deleteRemovedVideos(this.slug, allFiles)
   if (deletedHashes.length > 0) {
-    Log(tag, `Removed ${deletedHashes.length} videos from database that are no longer in queue`, this)
+    Log(tag, `Removed ${deletedHashes.length} videos from database that are no longer on disk`, this)
   }
 
   if (addedCount > 0) {
     Log(tag, `Added ${addedCount} new videos to database`, this)
   }
 
-  // Initialize playlist manager
-  this.playlistManager = new PlaylistManager(this)
+  // Initialize guide generator (handles schedule creation)
+  this.guideGenerator = new GuideGenerator(this)
 
-  // Pre-warm the video list cache (lightweight metadata only, not all segments)
-  this.playlistManager.cachedVideoList = this.playlistManager.buildVideoList()
+  // Initialize playlist manager (serves HLS playlists based on guide)
+  this.playlistManager = new PlaylistManager(this)
+  this.playlistManager.setGuideGenerator(this.guideGenerator)
 
   // Start method
   this.start = () => {
     this.started = true
-    // Only set startTime if not restored from cache (preserves schedule across restarts)
-    if (!this.startTime) {
-      this.startTime = Date.now()
-    }
+    // Ensure guide exists for today (will load from history or generate new)
+    this.guideGenerator.ensureGuideExists()
     this.playlistManager.start()
     Log(tag, 'Channel started', this)
   }
 
-  // Get current playlist
+  // Get current playlist (delegates to PlaylistManager which uses GuideGenerator)
   this.getPlaylist = () => {
     if (!this.started) return null
-    const offset = (Date.now() - this.startTime) / 1000
-    return this.playlistManager.createRollingPlaylist(offset)
+    return this.playlistManager.createRollingPlaylist()
   }
 
-  Log(tag, `Finished initializing ${definition.type} channel "${definition.name}" with ${this.queue.length} supported videos.`, this)
+  Log(tag, `Finished initializing ${definition.type} channel "${definition.name}" with ${allFiles.length} supported videos.`, this)
 
 }
 
 module.exports = {
-  Channel: Channel,
-  initQueueCache: initQueueCache,
-  saveAllQueues: saveAllQueues,
-  resetQueueCache: resetQueueCache
+  Channel: Channel
 }
