@@ -51,15 +51,18 @@ function loadQueueCache(channelsJsonHash) {
     }
 
     Log(tag, 'Using cached queue data (channels.json unchanged)')
-    return cache.queues
+    return {
+      queues: cache.queues,
+      startTimes: cache.startTimes || {}
+    }
   } catch (e) {
     Log(tag, `Could not load queue cache: ${e.message}`)
     return null
   }
 }
 
-// Save queue cache with channels.json hash
-function saveQueueCache(channelsJsonHash, queues) {
+// Save queue cache with channels.json hash and start times
+function saveQueueCache(channelsJsonHash, queues, startTimes) {
   try {
     const cachePath = getQueueCachePath()
     const cacheDir = path.dirname(cachePath)
@@ -70,6 +73,7 @@ function saveQueueCache(channelsJsonHash, queues) {
     fs.writeFileSync(cachePath, JSON.stringify({
       channelsHash: channelsJsonHash,
       queues: queues,
+      startTimes: startTimes,
       savedAt: Date.now()
     }, null, 2))
   } catch (e) {
@@ -90,6 +94,7 @@ function hashChannelsJson(channelsPath) {
 // Module-level cache for queue loading
 let queueCacheLoaded = false
 let queueCacheData = null
+let startTimesData = null
 let channelsHash = null
 
 // Initialize queue cache - call this once before creating channels
@@ -98,20 +103,28 @@ function initQueueCache(channelsPath) {
 
   channelsHash = hashChannelsJson(channelsPath)
   if (channelsHash) {
-    queueCacheData = loadQueueCache(channelsHash)
+    const cache = loadQueueCache(channelsHash)
+    if (cache) {
+      queueCacheData = cache.queues
+      startTimesData = cache.startTimes
+    }
   }
   queueCacheLoaded = true
 }
 
-// Save all channel queues to cache - call after all channels are created
+// Save all channel queues and start times to cache - call after all channels are started
 function saveAllQueues(channels) {
   if (!channelsHash) return
 
   const queues = {}
+  const startTimes = {}
   channels.forEach(channel => {
     queues[channel.slug] = channel.queue
+    if (channel.startTime) {
+      startTimes[channel.slug] = channel.startTime
+    }
   })
-  saveQueueCache(channelsHash, queues)
+  saveQueueCache(channelsHash, queues, startTimes)
   Log(tag, `Saved queue cache for ${channels.length} channels`)
 }
 
@@ -119,6 +132,7 @@ function saveAllQueues(channels) {
 function resetQueueCache() {
   queueCacheLoaded = false
   queueCacheData = null
+  startTimesData = null
   channelsHash = null
 }
 
@@ -136,8 +150,13 @@ function Channel(definition) {
   // Check if we have cached queue data for this channel
   if (queueCacheData && queueCacheData[this.slug]) {
     this.queue = queueCacheData[this.slug]
-    Log(tag, `Loaded ${this.queue.length} files from cache`, this)
-    // Queue cache exists - order is preserved, guide will match
+    // Restore cached start time so schedule stays consistent across restarts
+    if (startTimesData && startTimesData[this.slug]) {
+      this.startTime = startTimesData[this.slug]
+      Log(tag, `Loaded ${this.queue.length} files from cache, restored start time`, this)
+    } else {
+      Log(tag, `Loaded ${this.queue.length} files from cache`, this)
+    }
   } else {
     // No cache - scan filesystem
     Log(tag, `Scanning filesystem...`, this)
@@ -196,7 +215,10 @@ function Channel(definition) {
   // Start method
   this.start = () => {
     this.started = true
-    this.startTime = Date.now()
+    // Only set startTime if not restored from cache (preserves schedule across restarts)
+    if (!this.startTime) {
+      this.startTime = Date.now()
+    }
     this.playlistManager.start()
     Log(tag, 'Channel started', this)
   }

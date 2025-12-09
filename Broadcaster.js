@@ -67,11 +67,6 @@ function initializeChannels(channelDefinitions, useCache = true) {
       const channel = new Channel(definition)
       ChannelPool().addChannel(channel)
     })
-
-    // Save queue cache after all channels are created (if we scanned filesystem)
-    if (useCache) {
-      saveAllQueues(ChannelPool().queue)
-    }
   } catch (e) {
     Log(tag, 'Unable to create channels: ' + e)
   }
@@ -122,6 +117,9 @@ async function startup() {
     // Guide and playlist automatically exclude videos that aren't transcoded yet
     ChannelPool().startBroadcast()
     Log(tag, 'Broadcast started - transcoding continues in background')
+
+    // Save queue cache with start times (after channels are started)
+    saveAllQueues(ChannelPool().queue)
 
     // Generate remaining streams in background
     PreGenerator.startGeneration().then(() => {
