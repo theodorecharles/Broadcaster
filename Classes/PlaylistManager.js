@@ -37,10 +37,9 @@ class PlaylistManager {
     }
 
     /**
-     * Generate segments for a video starting from a specific offset
-     * Returns segments from offsetInVideo to offsetInVideo + bufferDuration
+     * Generate all segments for a video
      */
-    generateSegmentsForVideo(videoHash, offsetInVideo, video, bufferDuration = 30) {
+    getAllSegmentsForVideo(videoHash, video) {
         if (!video || !video.segment_count || !video.duration_seconds) {
             return []
         }
@@ -49,24 +48,16 @@ class PlaylistManager {
         const numSegments = video.segment_count
         const avgSegmentDuration = video.duration_seconds / numSegments
 
-        // Find the starting segment based on offset
-        const startSegmentIndex = Math.floor(offsetInVideo / avgSegmentDuration)
-        const endOffset = offsetInVideo + bufferDuration
-
-        for (let i = startSegmentIndex; i < numSegments; i++) {
-            const segStart = i * avgSegmentDuration
+        for (let i = 0; i < numSegments; i++) {
             const segDuration = (i === numSegments - 1)
                 ? (video.duration_seconds - (i * avgSegmentDuration))
                 : avgSegmentDuration
-            const segEnd = segStart + segDuration
-
-            // Stop if past our buffer window
-            if (segStart >= endOffset) break
 
             segments.push({
                 duration: segDuration,
                 path: `channels/${this.channel.slug}/videos/${videoHash}/segment_${String(i).padStart(5, '0')}.ts`,
-                segmentIndex: i
+                segmentIndex: i,
+                videoHash: videoHash
             })
         }
 
@@ -76,6 +67,9 @@ class PlaylistManager {
     /**
      * Create a rolling playlist based on what the guide says should be playing now
      * This is the core method that serves HLS playlists to clients
+     *
+     * Strategy: Include all segments from start of video up to current position + buffer.
+     * This gives players enough context to sync properly.
      */
     createRollingPlaylist() {
         if (!this.guideGenerator) {
@@ -101,71 +95,84 @@ class PlaylistManager {
             return this.getEmptyPlaylist()
         }
 
-        // Calculate offset within the current video
+        // Calculate offset within the current video (in seconds)
         const offsetInVideo = (now - currentEntry.startTime) / 1000
+        const avgSegmentDuration = video.duration_seconds / video.segment_count
 
-        // Get segments for current position plus buffer ahead
+        // Get ALL segments for current video
+        const allCurrentSegments = this.getAllSegmentsForVideo(currentEntry.hash, video)
+
+        // Calculate which segment we're currently on
+        const currentSegmentIndex = Math.floor(offsetInVideo / avgSegmentDuration)
+
+        // Buffer configuration
         const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 2
-        const bufferAhead = 18 * segmentLength // ~18 segments ahead
+        const segmentsAhead = 18  // Buffer ahead
+        const segmentsBehind = 3  // Keep a few behind for seeking
 
-        const currentSegments = this.generateSegmentsForVideo(
-            currentEntry.hash,
-            offsetInVideo,
-            video,
-            bufferAhead
-        )
+        // Calculate window of segments to include
+        const startIndex = Math.max(0, currentSegmentIndex - segmentsBehind)
+        const endIndex = Math.min(allCurrentSegments.length, currentSegmentIndex + segmentsAhead)
+
+        // Get segments within our window
+        let segments = allCurrentSegments.slice(startIndex, endIndex)
 
         // Check if we need segments from the next video too
-        let nextSegments = []
         const timeUntilNextVideo = (currentEntry.endTime - now) / 1000
+        const bufferAheadSeconds = segmentsAhead * avgSegmentDuration
 
-        if (timeUntilNextVideo < bufferAhead) {
+        if (timeUntilNextVideo < bufferAheadSeconds && timeUntilNextVideo > 0) {
             // Need to include segments from next video
             const guide = this.guideGenerator.getActiveGuide()
             if (guide && guide.schedule) {
-                const currentIndex = guide.schedule.findIndex(e => e.hash === currentEntry.hash && e.startTime === currentEntry.startTime)
+                const currentIndex = guide.schedule.findIndex(
+                    e => e.hash === currentEntry.hash && e.startTime === currentEntry.startTime
+                )
                 if (currentIndex >= 0 && currentIndex < guide.schedule.length - 1) {
                     const nextEntry = guide.schedule[currentIndex + 1]
                     const nextVideo = this.getVideoByHash(nextEntry.hash)
 
                     if (nextVideo && nextVideo.segment_count) {
-                        const remainingBuffer = bufferAhead - timeUntilNextVideo
-                        nextSegments = this.generateSegmentsForVideo(
-                            nextEntry.hash,
-                            0,
-                            nextVideo,
-                            remainingBuffer
-                        )
+                        const nextSegments = this.getAllSegmentsForVideo(nextEntry.hash, nextVideo)
+                        // Calculate how many segments we need from next video
+                        const remainingBuffer = bufferAheadSeconds - timeUntilNextVideo
+                        const nextAvgDuration = nextVideo.duration_seconds / nextVideo.segment_count
+                        const segmentsNeeded = Math.ceil(remainingBuffer / nextAvgDuration)
+
+                        // Mark where discontinuity happens
+                        if (segments.length > 0) {
+                            segments[segments.length - 1].lastBeforeDiscontinuity = true
+                        }
+
+                        segments = segments.concat(nextSegments.slice(0, segmentsNeeded))
                     }
                 }
             }
         }
 
-        // Build the HLS playlist
-        const allSegments = [...currentSegments, ...nextSegments]
-
-        if (allSegments.length === 0) {
+        if (segments.length === 0) {
             return this.getEmptyPlaylist()
         }
 
-        // Calculate media sequence (use timestamp-based sequence for consistency)
-        const mediaSequence = Math.floor(now / 1000)
+        // Calculate media sequence based on the first segment we're showing
+        // This ensures sequence numbers are consistent as segments roll off
+        const mediaSequence = startIndex
 
         // Find max segment duration for TARGETDURATION
-        const maxDuration = Math.ceil(Math.max(...allSegments.map(s => s.duration), 2))
+        const maxDuration = Math.ceil(Math.max(...segments.map(s => s.duration), 2))
 
         let playlist = '#EXTM3U\n'
         playlist += '#EXT-X-VERSION:3\n'
         playlist += `#EXT-X-TARGETDURATION:${maxDuration}\n`
         playlist += `#EXT-X-MEDIA-SEQUENCE:${mediaSequence}\n`
 
-        // Add segments, with discontinuity tag between videos
-        let lastPath = null
-        allSegments.forEach((segment, index) => {
-            // Add discontinuity if switching to next video's segments
-            if (index === currentSegments.length && nextSegments.length > 0) {
+        // Add segments, with discontinuity tags at video transitions
+        let lastVideoHash = null
+        segments.forEach((segment) => {
+            if (lastVideoHash && segment.videoHash !== lastVideoHash) {
                 playlist += '#EXT-X-DISCONTINUITY\n'
             }
+            lastVideoHash = segment.videoHash
             playlist += `#EXTINF:${segment.duration.toFixed(6)},\n`
             playlist += `${segment.path}\n`
         })
