@@ -20,13 +20,26 @@ function checkNvidiaGPU() {
     if (gpuCheckDone) return hasNvidiaGPU
 
     try {
-        // Try to run nvidia-smi to detect NVIDIA GPU
-        execSync('nvidia-smi', { stdio: 'ignore' })
-        hasNvidiaGPU = true
-        Log(tag, 'NVIDIA GPU detected - hardware acceleration enabled')
+        // Run nvidia-smi and check if output contains GPU info
+        // Note: nvidia-smi may return non-zero exit code (e.g., 14) for warnings
+        // like corrupted infoROM, but still work fine for encoding
+        const output = execSync('nvidia-smi', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
+        if (output.includes('NVIDIA-SMI') && output.includes('Driver Version')) {
+            hasNvidiaGPU = true
+            Log(tag, 'NVIDIA GPU detected - hardware acceleration enabled')
+        } else {
+            hasNvidiaGPU = false
+            Log(tag, 'No NVIDIA GPU detected - using software encoding')
+        }
     } catch (error) {
-        hasNvidiaGPU = false
-        Log(tag, 'No NVIDIA GPU detected - using software encoding')
+        // Check if nvidia-smi ran but exited with non-zero (e.g., infoROM warning)
+        if (error.stdout && error.stdout.includes('NVIDIA-SMI') && error.stdout.includes('Driver Version')) {
+            hasNvidiaGPU = true
+            Log(tag, 'NVIDIA GPU detected - hardware acceleration enabled')
+        } else {
+            hasNvidiaGPU = false
+            Log(tag, 'No NVIDIA GPU detected - using software encoding')
+        }
     }
 
     gpuCheckDone = true
