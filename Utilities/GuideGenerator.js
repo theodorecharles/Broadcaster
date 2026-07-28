@@ -89,8 +89,14 @@ class GuideGenerator {
   getVideoDisplayName(filePath) {
     if (this.channel.paths) {
       for (const configuredPath of this.channel.paths) {
-        if (filePath.startsWith(configuredPath)) {
-          return path.basename(configuredPath)
+        const relativePath = path.relative(configuredPath, filePath)
+        const isWithinConfiguredPath = relativePath &&
+          relativePath !== '..' &&
+          !relativePath.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(relativePath)
+
+        if (isWithinConfiguredPath) {
+          return relativePath.split(path.sep)[0]
         }
       }
     }
