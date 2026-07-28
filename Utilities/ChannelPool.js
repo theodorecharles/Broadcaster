@@ -9,6 +9,10 @@ class ChannelPool {
 
   constructor() {
     this.queue = []
+    this.startupStatus = {
+      state: 'starting',
+      error: null
+    }
     Log(tag, 'Channel Pool created.')
   }
 
@@ -30,6 +34,17 @@ class ChannelPool {
 
   getChannelBySlug(slug) {
     return this.queue.find(c => c.slug === slug)
+  }
+
+  setStartupStatus(state, error = null) {
+    this.startupStatus = {
+      state,
+      error: error ? String(error.message || error) : null
+    }
+  }
+
+  getStartupStatus() {
+    return { ...this.startupStatus }
   }
 
   startBroadcast() {

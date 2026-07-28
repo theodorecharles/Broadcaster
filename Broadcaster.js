@@ -8,6 +8,7 @@ const tag = "Main"
 const fs = require('fs')
 const path = require('path')
 const TelevisionUI = require('./Webapp/TelevisionUI.js')
+const { scheduleBackgroundStartup } = require('./Utilities/Startup.js')
 const { CACHE_DIR, CHANNEL_LIST } = process.env
 
 // Support both absolute paths (/data/channels.json) and relative paths (./channels.json)
@@ -82,43 +83,14 @@ async function startup() {
     Log(tag, 'Unable to start the TV UI: ' + e)
   }
 
-  // Run migration in background (don't await)
+  // Run migration in background (don't block the UI)
   Log(tag, 'Migrating existing transcoded videos to database (background)...')
-  setImmediate(async () => {
-    migrateAll()
-    backfillDurations()
-
-    // Invalidate all guide caches so they pick up any backfilled data
-    Log(tag, 'Invalidating guide caches after migration...')
-    ChannelPool().queue.forEach(channel => {
-      if (channel.guideGenerator) {
-        channel.guideGenerator.invalidateCache()
-      }
-    })
-
-    // After migration, queue channels asynchronously (don't block event loop!)
-    Log(tag, 'Checking for pre-generated HLS streams...')
-
-    // Queue channels one at a time with setImmediate between each
-    // This allows the event loop to process web requests between channels
-    for (const channel of ChannelPool().queue) {
-      await new Promise(resolve => setImmediate(() => {
-        PreGenerator.queueChannel(channel)
-        resolve()
-      }))
-    }
-
-    // Start broadcast - channels will play whatever content is ready
-    // Guide determines what plays, playlist serves segments based on guide
-    ChannelPool().startBroadcast()
-    Log(tag, 'Broadcast started - transcoding continues in background')
-
-    // Generate remaining streams in background
-    PreGenerator.startGeneration().then(() => {
-      Log(tag, 'All HLS streams ready!')
-    }).catch(e => {
-      Log(tag, 'Error during pre-generation: ' + e)
-    })
+  scheduleBackgroundStartup({
+    channelPool: ChannelPool(),
+    preGenerator: PreGenerator,
+    migrateAll,
+    backfillDurations,
+    log: (message) => Log(tag, message)
   })
 }
 
