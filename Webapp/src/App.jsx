@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Hls from 'hls.js'
 import './App.css'
+import { cancelChannelSwitch, scheduleChannelSwitch } from './channelSwitch.mjs'
 
 // Marquee component that only animates when text is truncated
 function MarqueeTitle({ title }) {
@@ -34,6 +35,7 @@ function MarqueeTitle({ title }) {
 function App() {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
+  const channelSwitchTimeoutRef = useRef(null)
   const overlayTimeoutRef = useRef(null)
   const guideRef = useRef(null)
 
@@ -137,6 +139,8 @@ function App() {
   const changeChannel = (index) => {
     if (index < 0 || index >= channels.length || !isPoweredOn) return
 
+    cancelChannelSwitch(channelSwitchTimeoutRef)
+
     setCurrentChannelIndex(index)
     const channel = channels[index]
 
@@ -153,7 +157,7 @@ function App() {
     showOverlay(setShowChannelOverlay)
 
     // Load new channel after brief delay
-    setTimeout(() => {
+    scheduleChannelSwitch(channelSwitchTimeoutRef, () => {
       const playlistUrl = `/${channel.slug}.m3u8`
 
       if (Hls.isSupported()) {
@@ -316,6 +320,8 @@ function App() {
       setIsPoweredOn(false)
       setPowerAnimation('power-off')
 
+      cancelChannelSwitch(channelSwitchTimeoutRef)
+
       setTimeout(() => {
         if (hlsRef.current) {
           hlsRef.current.destroy()
@@ -335,6 +341,15 @@ function App() {
       }, 500)
     }
   }
+
+  useEffect(() => {
+    return () => {
+      cancelChannelSwitch(channelSwitchTimeoutRef)
+      if (hlsRef.current) {
+        hlsRef.current.destroy()
+      }
+    }
+  }, [])
 
   // Fullscreen
   const toggleFullscreen = () => {
