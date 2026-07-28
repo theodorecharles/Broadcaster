@@ -1,7 +1,7 @@
 services:
   broadcaster:
     # Use pre-built image from Docker Hub
-    image: theodoreroddy/broadcaster:latest
+    image: tedcharles/broadcaster:latest
 
     # Or build locally (uncomment the line below and comment out the image line above)
     # build: .
