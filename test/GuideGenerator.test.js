@@ -326,3 +326,43 @@ test('excludes unusable durations before scheduling a mixed library', () => {
   assert.equal(guide.schedule[0].duration, 86400)
   assert.deepEqual(guide.shuffleState, { remaining: [], videoCount: 1 })
 })
+
+test('validation ignores zero-duration rows when comparing library size', () => {
+  const crypto = require('node:crypto')
+  const dayStart = local3am(2026, 0, 1)
+  const validPath = '/library/valid.mp4'
+  const validHash = crypto.createHash('md5').update(validPath).digest('hex')
+  const generator = new GuideGenerator({
+    slug: 'test-channel',
+    name: 'Test Channel',
+    paths: ['/library']
+  })
+  videos = [
+    { file_path: validPath, duration_seconds: 86400 },
+    { file_path: '/library/zero.mp4', duration_seconds: 0 },
+    { file_path: '/library/null.mp4', duration_seconds: null }
+  ]
+
+  const guide = {
+    version: 2,
+    generatedAt: Date.now(),
+    dayStart,
+    dayEnd: dayStart + (24 * 60 * 60 * 1000),
+    channelSlug: 'test-channel',
+    channelName: 'Test Channel',
+    schedule: [{
+      hash: validHash,
+      title: 'valid.mp4',
+      filePath: validPath,
+      startTime: dayStart,
+      endTime: dayStart + (24 * 60 * 60 * 1000),
+      duration: 86400
+    }],
+    shuffleState: {
+      remaining: [],
+      videoCount: 1
+    }
+  }
+
+  assert.equal(generator.getGuideValidationError(guide), null)
+})

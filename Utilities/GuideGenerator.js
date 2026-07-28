@@ -70,7 +70,11 @@ class GuideGenerator {
     }
 
     const db = Database()
-    const videos = db.getChannelVideos(this.channel.slug, true)
+    // Match generateDailyGuide: only count videos with a finite positive duration
+    // so zero-duration rows do not permanently mark guides stale.
+    const videos = db.getChannelVideos(this.channel.slug, true).filter(video =>
+      Number.isFinite(video.duration_seconds) && video.duration_seconds > 0
+    )
     const currentHashes = new Set(videos.map(video =>
       crypto.createHash('md5').update(video.file_path).digest('hex')
     ))
