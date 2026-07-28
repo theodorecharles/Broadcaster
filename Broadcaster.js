@@ -56,15 +56,21 @@ function loadChannels() {
 }
 
 // Initialize channels from config
-function initializeChannels(channelDefinitions) {
-  try {
-    channelDefinitions.forEach(definition => {
-      const channel = new Channel(definition)
-      ChannelPool().addChannel(channel)
-    })
-  } catch (e) {
-    Log(tag, 'Unable to create channels: ' + e)
-  }
+function initializeChannels(channelDefinitions, dependencies = {}) {
+  const createChannel = dependencies.createChannel || (definition => new Channel(definition))
+  const channelPool = dependencies.channelPool || ChannelPool()
+  const log = dependencies.log || Log
+
+  channelDefinitions.forEach(definition => {
+    try {
+      const channel = createChannel(definition)
+      channelPool.addChannel(channel)
+    } catch (e) {
+      const channelName = definition && (definition.name || definition.slug)
+      const channelDescription = channelName ? ` "${channelName}"` : ''
+      log(tag, `Unable to create channel${channelDescription}: ${e}`)
+    }
+  })
 }
 
 // Startup sequence
@@ -122,4 +128,10 @@ async function startup() {
   })
 }
 
-startup()
+if (require.main === module) {
+  startup()
+}
+
+module.exports = {
+  initializeChannels
+}
