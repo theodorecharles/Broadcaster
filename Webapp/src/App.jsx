@@ -1,6 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import Hls from 'hls.js'
 import './App.css'
+import {
+  removeEndedListener as removeEndedListenerFromRef,
+  replaceEndedListener
+} from './endedListener.mjs'
 
 // Marquee component that only animates when text is truncated
 function MarqueeTitle({ title }) {
@@ -67,17 +71,11 @@ function App() {
   }
 
   const removeEndedListener = () => {
-    const listener = endedListenerRef.current
-    if (!listener) return
-
-    listener.video.removeEventListener('ended', listener.handler)
-    endedListenerRef.current = null
+    removeEndedListenerFromRef(endedListenerRef)
   }
 
   const addEndedListener = (video, handler) => {
-    removeEndedListener()
-    video.addEventListener('ended', handler)
-    endedListenerRef.current = { video, handler }
+    replaceEndedListener(endedListenerRef, video, handler)
   }
 
   const stopPlaybackSession = () => {
