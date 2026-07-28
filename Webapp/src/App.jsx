@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Hls from 'hls.js'
 import './App.css'
+import { showOverlay } from './overlayTimer.mjs'
 
 // Marquee component that only animates when text is truncated
 function MarqueeTitle({ title }) {
@@ -34,7 +35,8 @@ function MarqueeTitle({ title }) {
 function App() {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
-  const overlayTimeoutRef = useRef(null)
+  const channelOverlayTimeoutRef = useRef(null)
+  const volumeOverlayTimeoutRef = useRef(null)
   const guideRef = useRef(null)
 
   const [channels, setChannels] = useState([])
@@ -126,13 +128,6 @@ function App() {
     return () => clearInterval(interval)
   }, [showGuide])
 
-  // Show overlay helper
-  const showOverlay = (setter, duration = 2000) => {
-    setter(true)
-    if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current)
-    overlayTimeoutRef.current = setTimeout(() => setter(false), duration)
-  }
-
   // Change channel
   const changeChannel = (index) => {
     if (index < 0 || index >= channels.length || !isPoweredOn) return
@@ -150,7 +145,7 @@ function App() {
     }
 
     // Update display
-    showOverlay(setShowChannelOverlay)
+    showOverlay(setShowChannelOverlay, channelOverlayTimeoutRef)
 
     // Load new channel after brief delay
     setTimeout(() => {
@@ -247,7 +242,7 @@ function App() {
     const newVolume = Math.min(1.0, currentVolume + 0.1)
     setCurrentVolume(newVolume)
     if (videoRef.current) videoRef.current.volume = newVolume
-    showOverlay(setShowVolumeOverlay, 1500)
+    showOverlay(setShowVolumeOverlay, volumeOverlayTimeoutRef, 1500)
   }
 
   const volumeDown = () => {
@@ -255,7 +250,7 @@ function App() {
     const newVolume = Math.max(0, currentVolume - 0.1)
     setCurrentVolume(newVolume)
     if (videoRef.current) videoRef.current.volume = newVolume
-    showOverlay(setShowVolumeOverlay, 1500)
+    showOverlay(setShowVolumeOverlay, volumeOverlayTimeoutRef, 1500)
   }
 
   // Play static channel
