@@ -4,18 +4,12 @@ on:
   push:
     branches:
       - master
-  pull_request:
-    types:
-      - closed
-    branches:
-      - master
 
 env:
   DOCKER_IMAGE: tedcharles/broadcaster
 
 jobs:
   build-and-push:
-    if: github.event_name == 'push' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     environment: Prod
 
@@ -55,7 +49,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
       - name: Update Docker Hub description
         uses: peter-evans/dockerhub-description@v4
