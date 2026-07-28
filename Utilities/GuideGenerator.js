@@ -55,6 +55,31 @@ class GuideGenerator {
     return `guide-${this.channel.slug}-${dateStr}.json`
   }
 
+  // Check that a saved guide still matches the channel's transcoded library
+  getGuideValidationError(guide) {
+    if (!guide || !Array.isArray(guide.schedule)) {
+      return 'guide data is malformed'
+    }
+
+    const db = Database()
+    const videos = db.getChannelVideos(this.channel.slug, true)
+    const currentHashes = new Set(videos.map(video =>
+      crypto.createHash('md5').update(video.file_path).digest('hex')
+    ))
+
+    const missingEntry = guide.schedule.find(entry => !currentHashes.has(entry.hash))
+    if (missingEntry) {
+      return `scheduled video ${missingEntry.hash} is no longer available`
+    }
+
+    const savedVideoCount = guide.shuffleState && guide.shuffleState.videoCount
+    if (savedVideoCount !== videos.length) {
+      return `library size changed from ${savedVideoCount ?? 'unknown'} to ${videos.length}`
+    }
+
+    return null
+  }
+
   // Load guide from history for a specific day
   loadGuideForDay(dayStart) {
     const historyDir = this.getHistoryDir()
@@ -64,6 +89,11 @@ class GuideGenerator {
     try {
       if (fs.existsSync(filePath)) {
         const guide = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+        const validationError = this.getGuideValidationError(guide)
+        if (validationError) {
+          Log(tag, `Ignoring stale ${filename}: ${validationError}`, this.channel)
+          return null
+        }
         Log(tag, `Loaded guide from ${filename}`, this.channel)
         return guide
       }
@@ -111,7 +141,10 @@ class GuideGenerator {
 
     if (videos.length === 0) {
       Log(tag, `No transcoded videos available`, this.channel)
-      return this.createEmptyGuide(dayStart)
+      const guide = this.createEmptyGuide(dayStart)
+      this.saveGuide(guide)
+      this.cachedGuide = guide
+      return guide
     }
 
     // Calculate total library duration
