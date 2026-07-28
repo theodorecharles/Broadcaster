@@ -36,6 +36,14 @@ function getNext3am(fromTime = Date.now()) {
   return date.getTime()
 }
 
+// Get the 3am boundary for the previous local-calendar day
+function getPreviousDay3am(dayStart) {
+  const date = new Date(dayStart)
+  date.setDate(date.getDate() - 1)
+  date.setHours(3, 0, 0, 0)
+  return date.getTime()
+}
+
 class GuideGenerator {
 
   constructor(channel) {
@@ -55,6 +63,35 @@ class GuideGenerator {
     return `guide-${this.channel.slug}-${dateStr}.json`
   }
 
+  // Check that a saved guide still matches the channel's transcoded library
+  getGuideValidationError(guide) {
+    if (!guide || !Array.isArray(guide.schedule)) {
+      return 'guide data is malformed'
+    }
+
+    const db = Database()
+    // Match generateDailyGuide: only count videos with a finite positive duration
+    // so zero-duration rows do not permanently mark guides stale.
+    const videos = db.getChannelVideos(this.channel.slug, true).filter(video =>
+      Number.isFinite(video.duration_seconds) && video.duration_seconds > 0
+    )
+    const currentHashes = new Set(videos.map(video =>
+      crypto.createHash('md5').update(video.file_path).digest('hex')
+    ))
+
+    const missingEntry = guide.schedule.find(entry => !currentHashes.has(entry.hash))
+    if (missingEntry) {
+      return `scheduled video ${missingEntry.hash} is no longer available`
+    }
+
+    const savedVideoCount = guide.shuffleState && guide.shuffleState.videoCount
+    if (savedVideoCount !== videos.length) {
+      return `library size changed from ${savedVideoCount ?? 'unknown'} to ${videos.length}`
+    }
+
+    return null
+  }
+
   // Load guide from history for a specific day
   loadGuideForDay(dayStart) {
     const historyDir = this.getHistoryDir()
@@ -64,6 +101,11 @@ class GuideGenerator {
     try {
       if (fs.existsSync(filePath)) {
         const guide = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+        const validationError = this.getGuideValidationError(guide)
+        if (validationError) {
+          Log(tag, `Ignoring stale ${filename}: ${validationError}`, this.channel)
+          return null
+        }
         Log(tag, `Loaded guide from ${filename}`, this.channel)
         return guide
       }
@@ -89,8 +131,14 @@ class GuideGenerator {
   getVideoDisplayName(filePath) {
     if (this.channel.paths) {
       for (const configuredPath of this.channel.paths) {
-        if (filePath.startsWith(configuredPath)) {
-          return path.basename(configuredPath)
+        const relativePath = path.relative(configuredPath, filePath)
+        const isWithinConfiguredPath = relativePath &&
+          relativePath !== '..' &&
+          !relativePath.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(relativePath)
+
+        if (isWithinConfiguredPath) {
+          return relativePath.split(path.sep)[0]
         }
       }
     }
@@ -103,27 +151,32 @@ class GuideGenerator {
       dayStart = getPrevious3am()
     }
 
-    const dayEnd = dayStart + (24 * 60 * 60 * 1000) // 24 hours
+    const dayEnd = getNext3am(dayStart)
 
     // Get all transcoded videos from database
     const db = Database()
-    const videos = db.getChannelVideos(this.channel.slug, true)
+    const videos = db.getChannelVideos(this.channel.slug, true).filter(video =>
+      Number.isFinite(video.duration_seconds) && video.duration_seconds > 0
+    )
 
     if (videos.length === 0) {
-      Log(tag, `No transcoded videos available`, this.channel)
-      return this.createEmptyGuide(dayStart)
+      Log(tag, `No transcoded videos with positive duration available`, this.channel)
+      const guide = this.createEmptyGuide(dayStart)
+      this.saveGuide(guide)
+      this.cachedGuide = guide
+      return guide
     }
 
     // Calculate total library duration
     const totalLibraryDuration = videos.reduce((sum, v) => sum + (v.duration_seconds || 0), 0)
-    const dayDurationSeconds = 24 * 60 * 60
+    const dayDurationSeconds = (dayEnd - dayStart) / 1000
 
-    Log(tag, `Generating guide: ${videos.length} videos, ${Math.round(totalLibraryDuration / 3600)}h library for 24h day`, this.channel)
+    Log(tag, `Generating guide: ${videos.length} videos, ${Math.round(totalLibraryDuration / 3600)}h library for ${dayDurationSeconds / 3600}h day`, this.channel)
 
     // Check if previous day's last video extends past dayStart
     let scheduleStart = dayStart
     let overlappingEntry = null
-    const prevDayStart = dayStart - (24 * 60 * 60 * 1000)
+    const prevDayStart = getPreviousDay3am(dayStart)
     const prevGuide = this.loadGuideForDay(prevDayStart)
 
     if (prevGuide && prevGuide.schedule && prevGuide.schedule.length > 0) {
@@ -138,27 +191,23 @@ class GuideGenerator {
     // Build schedule
     const schedule = overlappingEntry ? [{ ...overlappingEntry }] : []
     let currentTime = scheduleStart
-    let shuffledVideos = shuffleArray(videos)
+    const shouldShuffle = this.channel.type !== 'alphabetical'
+    let scheduledVideos = shouldShuffle ? shuffleArray(videos) : videos
     let videoIndex = 0
 
     while (currentTime < dayEnd) {
-      // If we've used all videos, reshuffle (for channels with < 24h content)
-      if (videoIndex >= shuffledVideos.length) {
+      // If we've used all videos, start the next library pass
+      if (videoIndex >= scheduledVideos.length) {
         if (totalLibraryDuration >= dayDurationSeconds) {
           // Library is big enough, shouldn't need repeats - but just in case
-          Log(tag, `Reshuffling (unexpected - library should cover 24h)`, this.channel)
+          Log(tag, `Restarting video sequence (unexpected - library should cover guide interval)`, this.channel)
         }
-        shuffledVideos = shuffleArray(videos)
+        scheduledVideos = shouldShuffle ? shuffleArray(videos) : videos
         videoIndex = 0
       }
 
-      const video = shuffledVideos[videoIndex]
-      const duration = video.duration_seconds || 0
-
-      if (duration <= 0) {
-        videoIndex++
-        continue
-      }
+      const video = scheduledVideos[videoIndex]
+      const duration = video.duration_seconds
 
       const hash = crypto.createHash('md5').update(video.file_path).digest('hex')
 
@@ -176,7 +225,7 @@ class GuideGenerator {
     }
 
     // Store remaining shuffle state for next day's continuity
-    const remainingHashes = shuffledVideos.slice(videoIndex).map(v =>
+    const remainingHashes = scheduledVideos.slice(videoIndex).map(v =>
       crypto.createHash('md5').update(v.file_path).digest('hex')
     )
 
@@ -207,7 +256,7 @@ class GuideGenerator {
       version: 2,
       generatedAt: Date.now(),
       dayStart: dayStart,
-      dayEnd: dayStart + (24 * 60 * 60 * 1000),
+      dayEnd: getNext3am(dayStart),
       channelSlug: this.channel.slug,
       channelName: this.channel.name,
       schedule: [],
@@ -256,7 +305,7 @@ class GuideGenerator {
     // Check the previous day for guides generated before overlapping entries
     // were carried forward. The overlap can last longer than one hour.
     const todayStart = getPrevious3am(time)
-    const prevDayStart = todayStart - (24 * 60 * 60 * 1000)
+    const prevDayStart = getPreviousDay3am(todayStart)
     const prevGuide = this.loadGuideForDay(prevDayStart)
     if (prevGuide && prevGuide.schedule) {
       entry = prevGuide.schedule.find(e => e.startTime <= time && e.endTime > time)
