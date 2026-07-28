@@ -226,3 +226,59 @@ test('keeps the parent-folder fallback outside configured roots', () => {
 
   assert.equal(guideGenerator.getVideoDisplayName(filePath), 'The Expanse')
 })
+
+test('channel type controls ordering across library repeats', (t) => {
+  t.mock.method(Math, 'random', () => 0)
+
+  videos = [
+    { file_path: '/media/Episode 01.mkv', duration_seconds: 4 * 60 * 60 },
+    { file_path: '/media/Episode 02.mkv', duration_seconds: 4 * 60 * 60 },
+    { file_path: '/media/Episode 03.mkv', duration_seconds: 4 * 60 * 60 }
+  ]
+
+  const dayStart = local3am(2026, 6, 28)
+
+  const generator = new GuideGenerator({
+    type: 'alphabetical',
+    slug: 'alphabetical',
+    name: 'Alphabetical',
+    paths: ['/media']
+  })
+  generator.loadGuideForDay = () => null
+  generator.saveGuide = () => {}
+  const guide = generator.generateDailyGuide(dayStart)
+
+  assert.deepEqual(
+    guide.schedule.map(entry => entry.filePath),
+    [
+      '/media/Episode 01.mkv',
+      '/media/Episode 02.mkv',
+      '/media/Episode 03.mkv',
+      '/media/Episode 01.mkv',
+      '/media/Episode 02.mkv',
+      '/media/Episode 03.mkv'
+    ]
+  )
+
+  const shuffleGenerator = new GuideGenerator({
+    type: 'shuffle',
+    slug: 'shuffle',
+    name: 'Shuffle',
+    paths: ['/media']
+  })
+  shuffleGenerator.loadGuideForDay = () => null
+  shuffleGenerator.saveGuide = () => {}
+  const shuffleGuide = shuffleGenerator.generateDailyGuide(dayStart)
+
+  assert.deepEqual(
+    shuffleGuide.schedule.map(entry => entry.filePath),
+    [
+      '/media/Episode 02.mkv',
+      '/media/Episode 03.mkv',
+      '/media/Episode 01.mkv',
+      '/media/Episode 02.mkv',
+      '/media/Episode 03.mkv',
+      '/media/Episode 01.mkv'
+    ]
+  )
+})

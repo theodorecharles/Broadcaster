@@ -152,21 +152,22 @@ class GuideGenerator {
     // Build schedule
     const schedule = overlappingEntry ? [{ ...overlappingEntry }] : []
     let currentTime = scheduleStart
-    let shuffledVideos = shuffleArray(videos)
+    const shouldShuffle = this.channel.type !== 'alphabetical'
+    let scheduledVideos = shouldShuffle ? shuffleArray(videos) : videos
     let videoIndex = 0
 
     while (currentTime < dayEnd) {
-      // If we've used all videos, reshuffle (for channels with less content than the guide interval)
-      if (videoIndex >= shuffledVideos.length) {
+      // If we've used all videos, start the next library pass
+      if (videoIndex >= scheduledVideos.length) {
         if (totalLibraryDuration >= dayDurationSeconds) {
           // Library is big enough, shouldn't need repeats - but just in case
-          Log(tag, `Reshuffling (unexpected - library should cover guide interval)`, this.channel)
+          Log(tag, `Restarting video sequence (unexpected - library should cover guide interval)`, this.channel)
         }
-        shuffledVideos = shuffleArray(videos)
+        scheduledVideos = shouldShuffle ? shuffleArray(videos) : videos
         videoIndex = 0
       }
 
-      const video = shuffledVideos[videoIndex]
+      const video = scheduledVideos[videoIndex]
       const duration = video.duration_seconds || 0
 
       if (duration <= 0) {
@@ -190,7 +191,7 @@ class GuideGenerator {
     }
 
     // Store remaining shuffle state for next day's continuity
-    const remainingHashes = shuffledVideos.slice(videoIndex).map(v =>
+    const remainingHashes = scheduledVideos.slice(videoIndex).map(v =>
       crypto.createHash('md5').update(v.file_path).digest('hex')
     )
 
