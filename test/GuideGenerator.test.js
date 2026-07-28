@@ -282,3 +282,47 @@ test('channel type controls ordering across library repeats', (t) => {
     ]
   )
 })
+
+test('returns an empty guide when every transcoded video has an unusable duration', () => {
+  const dayStart = local3am(2026, 0, 1)
+  const generator = new GuideGenerator({
+    slug: 'test-channel',
+    name: 'Test Channel',
+    paths: ['/library']
+  })
+  videos = [
+    { file_path: '/library/null.mp4', duration_seconds: null },
+    { file_path: '/library/zero.mp4', duration_seconds: 0 },
+    { file_path: '/library/negative.mp4', duration_seconds: -1 }
+  ]
+  generator.loadGuideForDay = () => null
+  generator.saveGuide = () => {}
+
+  const guide = generator.generateDailyGuide(dayStart)
+
+  assert.deepEqual(guide.schedule, [])
+  assert.deepEqual(guide.shuffleState, { remaining: [], videoCount: 0 })
+})
+
+test('excludes unusable durations before scheduling a mixed library', () => {
+  const dayStart = local3am(2026, 0, 1)
+  const generator = new GuideGenerator({
+    slug: 'test-channel',
+    name: 'Test Channel',
+    paths: ['/library']
+  })
+  videos = [
+    { file_path: '/library/valid.mp4', duration_seconds: 86400 },
+    { file_path: '/library/null.mp4', duration_seconds: null },
+    { file_path: '/library/zero.mp4', duration_seconds: 0 }
+  ]
+  generator.loadGuideForDay = () => null
+  generator.saveGuide = () => {}
+
+  const guide = generator.generateDailyGuide(dayStart)
+
+  assert.equal(guide.schedule.length, 1)
+  assert.equal(guide.schedule[0].filePath, '/library/valid.mp4')
+  assert.equal(guide.schedule[0].duration, 86400)
+  assert.deepEqual(guide.shuffleState, { remaining: [], videoCount: 1 })
+})

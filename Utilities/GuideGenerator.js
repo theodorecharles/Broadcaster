@@ -121,10 +121,12 @@ class GuideGenerator {
 
     // Get all transcoded videos from database
     const db = Database()
-    const videos = db.getChannelVideos(this.channel.slug, true)
+    const videos = db.getChannelVideos(this.channel.slug, true).filter(video =>
+      Number.isFinite(video.duration_seconds) && video.duration_seconds > 0
+    )
 
     if (videos.length === 0) {
-      Log(tag, `No transcoded videos available`, this.channel)
+      Log(tag, `No transcoded videos with positive duration available`, this.channel)
       return this.createEmptyGuide(dayStart)
     }
 
@@ -168,12 +170,7 @@ class GuideGenerator {
       }
 
       const video = scheduledVideos[videoIndex]
-      const duration = video.duration_seconds || 0
-
-      if (duration <= 0) {
-        videoIndex++
-        continue
-      }
+      const duration = video.duration_seconds
 
       const hash = crypto.createHash('md5').update(video.file_path).digest('hex')
 
