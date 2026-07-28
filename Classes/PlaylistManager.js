@@ -5,6 +5,7 @@ const Log = require('../Utilities/Log.js')
 const Database = require('../Utilities/Database.js')
 const tag = 'PlaylistManager'
 const { CACHE_DIR, HLS_SEGMENT_LENGTH_SECONDS } = process.env
+const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000
 
 class PlaylistManager {
 
@@ -12,6 +13,8 @@ class PlaylistManager {
         this.channel = channel
         // GuideGenerator is set by Channel after construction
         this.guideGenerator = null
+        this.guideTimelineCache = new Map()
+        this.segmentCountCache = new Map()
     }
 
     /**
@@ -19,6 +22,229 @@ class PlaylistManager {
      */
     setGuideGenerator(guideGenerator) {
         this.guideGenerator = guideGenerator
+    }
+
+    /**
+     * Find an entry in a guide by its stable schedule identity
+     */
+    getEntryIndex(guide, entry) {
+        if (!guide || !Array.isArray(guide.schedule)) {
+            return -1
+        }
+
+        return guide.schedule.findIndex(
+            candidate => candidate.hash === entry.hash && candidate.startTime === entry.startTime
+        )
+    }
+
+    /**
+     * Find the guide that owns an entry. Around the 3am boundary the active
+     * entry can still belong to the previous day's guide.
+     */
+    getGuideContainingEntry(entry) {
+        const activeGuide = this.guideGenerator.getActiveGuide()
+        if (this.getEntryIndex(activeGuide, entry) >= 0) {
+            return activeGuide
+        }
+
+        if (
+            activeGuide
+            && Number.isFinite(activeGuide.dayStart)
+            && typeof this.guideGenerator.loadGuideForDay === 'function'
+        ) {
+            const previousGuide = this.guideGenerator.loadGuideForDay(
+                activeGuide.dayStart - DAY_IN_MILLISECONDS
+            )
+            if (this.getEntryIndex(previousGuide, entry) >= 0) {
+                return previousGuide
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Use exact transcoded segment counts when available. Historical guide
+     * entries can outlive their database rows, so retain a duration fallback.
+     */
+    getSegmentCountForEntry(entry) {
+        if (this.segmentCountCache.has(entry.hash)) {
+            return this.segmentCountCache.get(entry.hash)
+        }
+
+        const video = this.getVideoByHash(entry.hash)
+        if (video && Number.isInteger(video.segment_count) && video.segment_count > 0) {
+            this.segmentCountCache.set(entry.hash, video.segment_count)
+            return video.segment_count
+        }
+
+        const duration = Number(entry.duration)
+            || ((Number(entry.endTime) - Number(entry.startTime)) / 1000)
+        const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 2
+
+        return Number.isFinite(duration) && duration > 0
+            ? Math.ceil(duration / segmentLength)
+            : 0
+    }
+
+    /**
+     * Calculate the channel-wide sequence offsets at the start of a guide.
+     * Daily guides are persisted, so walking backward once gives stable,
+     * exact offsets that survive program and day boundaries.
+     */
+    getGuideTimelineStart(guide) {
+        const getCacheKey = candidate => Number.isFinite(candidate.dayStart)
+            ? candidate.dayStart
+            : candidate
+        const requestedKey = getCacheKey(guide)
+        const cachedStart = this.guideTimelineCache.get(requestedKey)
+        if (cachedStart) {
+            return cachedStart
+        }
+
+        const guidesToCalculate = []
+        const visitedDayStarts = new Set()
+        let cursor = guide
+        let timelineStart = null
+
+        while (cursor) {
+            const cacheKey = getCacheKey(cursor)
+            const cached = this.guideTimelineCache.get(cacheKey)
+            if (cached) {
+                const cachedSchedule = Array.isArray(cursor.schedule)
+                    ? cursor.schedule
+                    : []
+                timelineStart = {
+                    mediaSequence: cached.mediaSequence + cachedSchedule.reduce(
+                        (total, entry) => total + this.getSegmentCountForEntry(entry),
+                        0
+                    ),
+                    discontinuitySequence:
+                        cached.discontinuitySequence + cachedSchedule.length
+                }
+                break
+            }
+
+            if (
+                Number.isFinite(cursor.dayStart)
+                && visitedDayStarts.has(cursor.dayStart)
+            ) {
+                timelineStart = { mediaSequence: 0, discontinuitySequence: 0 }
+                break
+            }
+
+            if (Number.isFinite(cursor.dayStart)) {
+                visitedDayStarts.add(cursor.dayStart)
+            }
+            guidesToCalculate.push(cursor)
+
+            if (
+                !Number.isFinite(cursor.dayStart)
+                || typeof this.guideGenerator.loadGuideForDay !== 'function'
+            ) {
+                timelineStart = { mediaSequence: 0, discontinuitySequence: 0 }
+                break
+            }
+
+            const previousGuide = this.guideGenerator.loadGuideForDay(
+                cursor.dayStart - DAY_IN_MILLISECONDS
+            )
+            if (!previousGuide) {
+                timelineStart = { mediaSequence: 0, discontinuitySequence: 0 }
+                break
+            }
+            cursor = previousGuide
+        }
+
+        if (!timelineStart) {
+            timelineStart = { mediaSequence: 0, discontinuitySequence: 0 }
+        }
+
+        for (let index = guidesToCalculate.length - 1; index >= 0; index--) {
+            const currentGuide = guidesToCalculate[index]
+            const currentStart = {
+                mediaSequence: timelineStart.mediaSequence,
+                discontinuitySequence: timelineStart.discontinuitySequence
+            }
+            this.guideTimelineCache.set(getCacheKey(currentGuide), currentStart)
+
+            const schedule = Array.isArray(currentGuide.schedule)
+                ? currentGuide.schedule
+                : []
+            timelineStart = {
+                mediaSequence: currentStart.mediaSequence + schedule.reduce(
+                    (total, entry) => total + this.getSegmentCountForEntry(entry),
+                    0
+                ),
+                discontinuitySequence: currentStart.discontinuitySequence + schedule.length
+            }
+        }
+
+        return this.guideTimelineCache.get(requestedKey)
+    }
+
+    /**
+     * Resolve the sequence numbers assigned to the first segment of an entry.
+     */
+    getEntryTimelinePosition(entry) {
+        const guide = this.getGuideContainingEntry(entry)
+        const entryIndex = this.getEntryIndex(guide, entry)
+
+        if (!guide || entryIndex < 0) {
+            const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 2
+            return {
+                mediaSequence: Math.floor(entry.startTime / (segmentLength * 1000)),
+                discontinuitySequence: 0,
+                guide: null,
+                entryIndex: -1
+            }
+        }
+
+        const guideStart = this.getGuideTimelineStart(guide)
+        const precedingSegmentCount = guide.schedule
+            .slice(0, entryIndex)
+            .reduce(
+                (total, scheduleEntry) => total + this.getSegmentCountForEntry(scheduleEntry),
+                0
+            )
+
+        return {
+            mediaSequence: guideStart.mediaSequence + precedingSegmentCount,
+            discontinuitySequence: guideStart.discontinuitySequence + entryIndex,
+            guide: guide,
+            entryIndex: entryIndex
+        }
+    }
+
+    /**
+     * Find the next scheduled entry, including a daily guide boundary.
+     */
+    getNextEntry(timelinePosition) {
+        const { guide, entryIndex } = timelinePosition
+        if (!guide || entryIndex < 0) {
+            return null
+        }
+
+        if (entryIndex < guide.schedule.length - 1) {
+            return guide.schedule[entryIndex + 1]
+        }
+
+        if (
+            !Number.isFinite(guide.dayStart)
+            || typeof this.guideGenerator.loadGuideForDay !== 'function'
+        ) {
+            return null
+        }
+
+        const nextDayStart = guide.dayStart + DAY_IN_MILLISECONDS
+        const activeGuide = this.guideGenerator.getActiveGuide()
+        const nextGuide = activeGuide && activeGuide.dayStart === nextDayStart
+            ? activeGuide
+            : this.guideGenerator.loadGuideForDay(nextDayStart)
+
+        return nextGuide && Array.isArray(nextGuide.schedule)
+            ? nextGuide.schedule[0] || null
+            : null
     }
 
     /**
@@ -94,6 +320,7 @@ class PlaylistManager {
             Log(tag, `Video not found or not transcoded: ${currentEntry.hash}`, this.channel)
             return this.getEmptyPlaylist()
         }
+        this.segmentCountCache.set(currentEntry.hash, video.segment_count)
 
         // Calculate offset within the current video (in seconds)
         const offsetInVideo = (now - currentEntry.startTime) / 1000
@@ -116,6 +343,7 @@ class PlaylistManager {
 
         // Get segments within our window
         let segments = allCurrentSegments.slice(startIndex, endIndex)
+        const timelinePosition = this.getEntryTimelinePosition(currentEntry)
 
         // Check if we need segments from the next video too
         const timeUntilNextVideo = (currentEntry.endTime - now) / 1000
@@ -123,30 +351,25 @@ class PlaylistManager {
 
         if (timeUntilNextVideo < bufferAheadSeconds && timeUntilNextVideo > 0) {
             // Need to include segments from next video
-            const guide = this.guideGenerator.getActiveGuide()
-            if (guide && guide.schedule) {
-                const currentIndex = guide.schedule.findIndex(
-                    e => e.hash === currentEntry.hash && e.startTime === currentEntry.startTime
-                )
-                if (currentIndex >= 0 && currentIndex < guide.schedule.length - 1) {
-                    const nextEntry = guide.schedule[currentIndex + 1]
-                    const nextVideo = this.getVideoByHash(nextEntry.hash)
+            const nextEntry = this.getNextEntry(timelinePosition)
+            const nextVideo = nextEntry
+                ? this.getVideoByHash(nextEntry.hash)
+                : null
 
-                    if (nextVideo && nextVideo.segment_count) {
-                        const nextSegments = this.getAllSegmentsForVideo(nextEntry.hash, nextVideo)
-                        // Calculate how many segments we need from next video
-                        const remainingBuffer = bufferAheadSeconds - timeUntilNextVideo
-                        const nextAvgDuration = nextVideo.duration_seconds / nextVideo.segment_count
-                        const segmentsNeeded = Math.ceil(remainingBuffer / nextAvgDuration)
+            if (nextVideo && nextVideo.segment_count) {
+                this.segmentCountCache.set(nextEntry.hash, nextVideo.segment_count)
+                const nextSegments = this.getAllSegmentsForVideo(nextEntry.hash, nextVideo)
+                // Calculate how many segments we need from next video
+                const remainingBuffer = bufferAheadSeconds - timeUntilNextVideo
+                const nextAvgDuration = nextVideo.duration_seconds / nextVideo.segment_count
+                const segmentsNeeded = Math.ceil(remainingBuffer / nextAvgDuration)
+                const nextWindow = nextSegments.slice(0, segmentsNeeded)
 
-                        // Mark where discontinuity happens
-                        if (segments.length > 0) {
-                            segments[segments.length - 1].lastBeforeDiscontinuity = true
-                        }
-
-                        segments = segments.concat(nextSegments.slice(0, segmentsNeeded))
-                    }
+                if (nextWindow.length > 0) {
+                    nextWindow[0].startsDiscontinuity = true
                 }
+
+                segments = segments.concat(nextWindow)
             }
         }
 
@@ -154,9 +377,8 @@ class PlaylistManager {
             return this.getEmptyPlaylist()
         }
 
-        // Calculate media sequence based on the first segment we're showing
-        // This ensures sequence numbers are consistent as segments roll off
-        const mediaSequence = startIndex
+        // Sequence the first segment on the channel-wide guide timeline
+        const mediaSequence = timelinePosition.mediaSequence + startIndex
 
         // Find max segment duration for TARGETDURATION
         const maxDuration = Math.ceil(Math.max(...segments.map(s => s.duration), 2))
@@ -165,11 +387,15 @@ class PlaylistManager {
         playlist += '#EXT-X-VERSION:3\n'
         playlist += `#EXT-X-TARGETDURATION:${maxDuration}\n`
         playlist += `#EXT-X-MEDIA-SEQUENCE:${mediaSequence}\n`
+        playlist += `#EXT-X-DISCONTINUITY-SEQUENCE:${timelinePosition.discontinuitySequence}\n`
 
         // Add segments, with discontinuity tags at video transitions
         let lastVideoHash = null
         segments.forEach((segment) => {
-            if (lastVideoHash && segment.videoHash !== lastVideoHash) {
+            if (
+                segment.startsDiscontinuity
+                || (lastVideoHash && segment.videoHash !== lastVideoHash)
+            ) {
                 playlist += '#EXT-X-DISCONTINUITY\n'
             }
             lastVideoHash = segment.videoHash
@@ -294,6 +520,8 @@ class PlaylistManager {
         if (this.guideGenerator) {
             this.guideGenerator.invalidateCache()
         }
+        this.guideTimelineCache.clear()
+        this.segmentCountCache.clear()
     }
 }
 
