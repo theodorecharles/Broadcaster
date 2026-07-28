@@ -36,6 +36,14 @@ function getNext3am(fromTime = Date.now()) {
   return date.getTime()
 }
 
+// Get the 3am boundary for the previous local-calendar day
+function getPreviousDay3am(dayStart) {
+  const date = new Date(dayStart)
+  date.setDate(date.getDate() - 1)
+  date.setHours(3, 0, 0, 0)
+  return date.getTime()
+}
+
 class GuideGenerator {
 
   constructor(channel) {
@@ -103,7 +111,7 @@ class GuideGenerator {
       dayStart = getPrevious3am()
     }
 
-    const dayEnd = dayStart + (24 * 60 * 60 * 1000) // 24 hours
+    const dayEnd = getNext3am(dayStart)
 
     // Get all transcoded videos from database
     const db = Database()
@@ -116,14 +124,14 @@ class GuideGenerator {
 
     // Calculate total library duration
     const totalLibraryDuration = videos.reduce((sum, v) => sum + (v.duration_seconds || 0), 0)
-    const dayDurationSeconds = 24 * 60 * 60
+    const dayDurationSeconds = (dayEnd - dayStart) / 1000
 
-    Log(tag, `Generating guide: ${videos.length} videos, ${Math.round(totalLibraryDuration / 3600)}h library for 24h day`, this.channel)
+    Log(tag, `Generating guide: ${videos.length} videos, ${Math.round(totalLibraryDuration / 3600)}h library for ${dayDurationSeconds / 3600}h day`, this.channel)
 
     // Check if previous day's last video extends past dayStart
     let scheduleStart = dayStart
     let overlappingEntry = null
-    const prevDayStart = dayStart - (24 * 60 * 60 * 1000)
+    const prevDayStart = getPreviousDay3am(dayStart)
     const prevGuide = this.loadGuideForDay(prevDayStart)
 
     if (prevGuide && prevGuide.schedule && prevGuide.schedule.length > 0) {
@@ -142,11 +150,11 @@ class GuideGenerator {
     let videoIndex = 0
 
     while (currentTime < dayEnd) {
-      // If we've used all videos, reshuffle (for channels with < 24h content)
+      // If we've used all videos, reshuffle (for channels with less content than the guide interval)
       if (videoIndex >= shuffledVideos.length) {
         if (totalLibraryDuration >= dayDurationSeconds) {
           // Library is big enough, shouldn't need repeats - but just in case
-          Log(tag, `Reshuffling (unexpected - library should cover 24h)`, this.channel)
+          Log(tag, `Reshuffling (unexpected - library should cover guide interval)`, this.channel)
         }
         shuffledVideos = shuffleArray(videos)
         videoIndex = 0
@@ -207,7 +215,7 @@ class GuideGenerator {
       version: 2,
       generatedAt: Date.now(),
       dayStart: dayStart,
-      dayEnd: dayStart + (24 * 60 * 60 * 1000),
+      dayEnd: getNext3am(dayStart),
       channelSlug: this.channel.slug,
       channelName: this.channel.name,
       schedule: [],
@@ -256,7 +264,7 @@ class GuideGenerator {
     // Check the previous day for guides generated before overlapping entries
     // were carried forward. The overlap can last longer than one hour.
     const todayStart = getPrevious3am(time)
-    const prevDayStart = todayStart - (24 * 60 * 60 * 1000)
+    const prevDayStart = getPreviousDay3am(todayStart)
     const prevGuide = this.loadGuideForDay(prevDayStart)
     if (prevGuide && prevGuide.schedule) {
       entry = prevGuide.schedule.find(e => e.startTime <= time && e.endTime > time)
