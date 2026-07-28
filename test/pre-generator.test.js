@@ -107,7 +107,7 @@ test('queues a database-positive video when its cache directory is missing', t =
 
     const { channel, queue } = queueSingleVideo(preGenerator)
 
-    assert.deepEqual(queue, [{ filePath, channel }])
+    assert.deepEqual(queue, [{ videoId: db.video.id, filePath, channel }])
     assert.equal(updates.length, 1)
     assert.match(updates[0].sql, /segment_count\s*=\s*NULL/i)
     assert.match(updates[0].sql, /WHERE id = \?/)
