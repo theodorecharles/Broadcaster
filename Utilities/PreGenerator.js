@@ -92,7 +92,11 @@ class PreGenerator {
         try {
             // Use the channel-scoped row returned by getVideoByPath. The same
             // source file can belong to more than one channel.
-            db.db.prepare('UPDATE videos SET transcoded = 0 WHERE id = ?').run(video.id)
+            db.db.prepare(`
+                UPDATE videos
+                SET transcoded = 0, segment_count = NULL
+                WHERE id = ?
+            `).run(video.id)
         } catch (e) {
             Log(tag, `Failed to update database: ${e.message}`)
         }
