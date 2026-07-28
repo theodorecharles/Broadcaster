@@ -4,7 +4,7 @@ const crypto = require('crypto')
 const Log = require('../Utilities/Log.js')
 const Database = require('../Utilities/Database.js')
 const tag = 'PlaylistManager'
-const { CACHE_DIR, HLS_SEGMENT_LENGTH_SECONDS } = process.env
+const { CACHE_DIR } = process.env
 
 class PlaylistManager {
 
@@ -12,6 +12,7 @@ class PlaylistManager {
         this.channel = channel
         // GuideGenerator is set by Channel after construction
         this.guideGenerator = null
+        this.segmentCache = new Map()
     }
 
     /**
@@ -40,28 +41,63 @@ class PlaylistManager {
      * Generate all segments for a video
      */
     getAllSegmentsForVideo(videoHash, video) {
-        if (!video || !video.segment_count || !video.duration_seconds) {
+        if (!video || !video.segment_count) {
             return []
         }
 
-        const segments = []
-        const numSegments = video.segment_count
-        const avgSegmentDuration = video.duration_seconds / numSegments
-
-        for (let i = 0; i < numSegments; i++) {
-            const segDuration = (i === numSegments - 1)
-                ? (video.duration_seconds - (i * avgSegmentDuration))
-                : avgSegmentDuration
-
-            segments.push({
-                duration: segDuration,
-                path: `channels/${this.channel.slug}/videos/${videoHash}/segment_${String(i).padStart(5, '0')}.ts`,
-                segmentIndex: i,
-                videoHash: videoHash
-            })
+        if (this.segmentCache.has(videoHash)) {
+            return this.segmentCache.get(videoHash)
         }
 
-        return segments
+        const playlistPath = path.join(
+            CACHE_DIR,
+            'channels',
+            this.channel.slug,
+            'videos',
+            videoHash,
+            'index.m3u8'
+        )
+
+        try {
+            const playlist = fs.readFileSync(playlistPath, 'utf8')
+            const durations = playlist
+                .split(/\r?\n/)
+                .filter(line => line.startsWith('#EXTINF:'))
+                .map(line => Number(line.slice('#EXTINF:'.length).split(',')[0]))
+
+            if (durations.length === 0 || durations.some(duration => !Number.isFinite(duration) || duration <= 0)) {
+                throw new Error('playlist contains invalid segment durations')
+            }
+
+            const segments = durations.map((duration, segmentIndex) => ({
+                duration: duration,
+                path: `channels/${this.channel.slug}/videos/${videoHash}/segment_${String(segmentIndex).padStart(5, '0')}.ts`,
+                segmentIndex: segmentIndex,
+                videoHash: videoHash
+            }))
+
+            this.segmentCache.set(videoHash, segments)
+            return segments
+        } catch (err) {
+            Log(tag, `Could not read segment durations for ${videoHash}: ${err.message}`, this.channel)
+            return []
+        }
+    }
+
+    /**
+     * Find the segment containing an offset using the playlist's cumulative durations
+     */
+    getSegmentIndexForOffset(segments, offsetSeconds) {
+        let segmentEnd = 0
+
+        for (let i = 0; i < segments.length; i++) {
+            segmentEnd += segments[i].duration
+            if (offsetSeconds < segmentEnd) {
+                return i
+            }
+        }
+
+        return Math.max(segments.length - 1, 0)
     }
 
     /**
@@ -97,16 +133,18 @@ class PlaylistManager {
 
         // Calculate offset within the current video (in seconds)
         const offsetInVideo = (now - currentEntry.startTime) / 1000
-        const avgSegmentDuration = video.duration_seconds / video.segment_count
 
         // Get ALL segments for current video
         const allCurrentSegments = this.getAllSegmentsForVideo(currentEntry.hash, video)
 
+        if (allCurrentSegments.length === 0) {
+            return this.getEmptyPlaylist()
+        }
+
         // Calculate which segment we're currently on
-        const currentSegmentIndex = Math.floor(offsetInVideo / avgSegmentDuration)
+        const currentSegmentIndex = this.getSegmentIndexForOffset(allCurrentSegments, offsetInVideo)
 
         // Buffer configuration
-        const segmentLength = parseFloat(HLS_SEGMENT_LENGTH_SECONDS) || 2
         const segmentsAhead = 18  // Buffer ahead
         const segmentsBehind = 3  // Keep a few behind for seeking
 
@@ -118,10 +156,10 @@ class PlaylistManager {
         let segments = allCurrentSegments.slice(startIndex, endIndex)
 
         // Check if we need segments from the next video too
-        const timeUntilNextVideo = (currentEntry.endTime - now) / 1000
-        const bufferAheadSeconds = segmentsAhead * avgSegmentDuration
+        const currentSegmentsAhead = allCurrentSegments.length - currentSegmentIndex
+        const nextSegmentsNeeded = segmentsAhead - currentSegmentsAhead
 
-        if (timeUntilNextVideo < bufferAheadSeconds && timeUntilNextVideo > 0) {
+        if (nextSegmentsNeeded > 0) {
             // Need to include segments from next video
             const guide = this.guideGenerator.getActiveGuide()
             if (guide && guide.schedule) {
@@ -134,17 +172,7 @@ class PlaylistManager {
 
                     if (nextVideo && nextVideo.segment_count) {
                         const nextSegments = this.getAllSegmentsForVideo(nextEntry.hash, nextVideo)
-                        // Calculate how many segments we need from next video
-                        const remainingBuffer = bufferAheadSeconds - timeUntilNextVideo
-                        const nextAvgDuration = nextVideo.duration_seconds / nextVideo.segment_count
-                        const segmentsNeeded = Math.ceil(remainingBuffer / nextAvgDuration)
-
-                        // Mark where discontinuity happens
-                        if (segments.length > 0) {
-                            segments[segments.length - 1].lastBeforeDiscontinuity = true
-                        }
-
-                        segments = segments.concat(nextSegments.slice(0, segmentsNeeded))
+                        segments = segments.concat(nextSegments.slice(0, nextSegmentsNeeded))
                     }
                 }
             }
@@ -291,6 +319,7 @@ class PlaylistManager {
      * Invalidate cache - now delegates to guide generator
      */
     invalidateCache() {
+        this.segmentCache.clear()
         if (this.guideGenerator) {
             this.guideGenerator.invalidateCache()
         }
