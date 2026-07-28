@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import Hls from 'hls.js'
 import './App.css'
+import { cancelChannelSwitch, scheduleChannelSwitch } from './channelSwitch.mjs'
+import { showOverlay } from './overlayTimer.mjs'
+import {
+  removeEndedListener as removeEndedListenerFromRef,
+  replaceEndedListener
+} from './endedListener.mjs'
 
 // Marquee component that only animates when text is truncated
 function MarqueeTitle({ title }) {
@@ -34,7 +40,11 @@ function MarqueeTitle({ title }) {
 function App() {
   const videoRef = useRef(null)
   const hlsRef = useRef(null)
-  const overlayTimeoutRef = useRef(null)
+  const channelSwitchTimeoutRef = useRef(null)
+  const channelOverlayTimeoutRef = useRef(null)
+  const volumeOverlayTimeoutRef = useRef(null)
+  const endedListenerRef = useRef(null)
+  const playbackTimeoutRef = useRef(null)
   const guideRef = useRef(null)
 
   const [channels, setChannels] = useState([])
@@ -56,6 +66,39 @@ function App() {
   const [tvSize, setTvSize] = useState({ width: 0, height: 0 })
   const [currentTime, setCurrentTime] = useState(new Date())
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 600)
+
+
+  const clearPlaybackTimeout = () => {
+    if (playbackTimeoutRef.current !== null) {
+      clearTimeout(playbackTimeoutRef.current)
+      playbackTimeoutRef.current = null
+    }
+  }
+
+  const removeEndedListener = () => {
+    removeEndedListenerFromRef(endedListenerRef)
+  }
+
+  const addEndedListener = (video, handler) => {
+    replaceEndedListener(endedListenerRef, video, handler)
+  }
+
+  const stopPlaybackSession = () => {
+    removeEndedListener()
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy()
+      hlsRef.current = null
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      cancelChannelSwitch(channelSwitchTimeoutRef)
+      clearPlaybackTimeout()
+      stopPlaybackSession()
+    }
+  }, [])
 
   // Calculate TV size based on window and aspect ratio
   useEffect(() => {
@@ -126,16 +169,11 @@ function App() {
     return () => clearInterval(interval)
   }, [showGuide])
 
-  // Show overlay helper
-  const showOverlay = (setter, duration = 2000) => {
-    setter(true)
-    if (overlayTimeoutRef.current) clearTimeout(overlayTimeoutRef.current)
-    overlayTimeoutRef.current = setTimeout(() => setter(false), duration)
-  }
-
   // Change channel
   const changeChannel = (index) => {
     if (index < 0 || index >= channels.length || !isPoweredOn) return
+
+    cancelChannelSwitch(channelSwitchTimeoutRef)
 
     setCurrentChannelIndex(index)
     const channel = channels[index]
@@ -143,17 +181,18 @@ function App() {
     // Show static during channel change
     setShowStatic(true)
 
-    // Stop current stream
-    if (hlsRef.current) {
-      hlsRef.current.destroy()
-      hlsRef.current = null
-    }
+    // Stop current stream (also removes prior ended handlers)
+    clearPlaybackTimeout()
+    stopPlaybackSession()
 
     // Update display
-    showOverlay(setShowChannelOverlay)
+    showOverlay(setShowChannelOverlay, channelOverlayTimeoutRef)
 
     // Load new channel after brief delay
-    setTimeout(() => {
+    scheduleChannelSwitch(channelSwitchTimeoutRef, () => {
+      const video = videoRef.current
+      if (!video) return
+
       const playlistUrl = `/${channel.slug}.m3u8`
 
       if (Hls.isSupported()) {
@@ -174,10 +213,10 @@ function App() {
         })
 
         hls.loadSource(playlistUrl)
-        hls.attachMedia(videoRef.current)
+        hls.attachMedia(video)
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          videoRef.current.play().catch(err => console.log('Autoplay blocked:', err))
+          video.play().catch(err => console.log('Autoplay blocked:', err))
           setShowStatic(false)
         })
 
@@ -209,7 +248,6 @@ function App() {
         hlsRef.current = hls
 
         // Recovery handlers for playback issues
-        const video = videoRef.current
         const handleEnded = () => {
           // Live streams shouldn't end - force reload if this happens
           console.log('Video ended unexpectedly, restarting stream...')
@@ -217,14 +255,14 @@ function App() {
           video.play().catch(() => {})
         }
 
-        video.addEventListener('ended', handleEnded)
-      } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
-        videoRef.current.src = playlistUrl
-        videoRef.current.play().catch(err => console.log('Autoplay blocked:', err))
+        addEndedListener(video, handleEnded)
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = playlistUrl
+        video.play().catch(err => console.log('Autoplay blocked:', err))
         setShowStatic(false)
       }
 
-      videoRef.current.volume = currentVolume
+      video.volume = currentVolume
     }, 500)
   }
 
@@ -247,7 +285,7 @@ function App() {
     const newVolume = Math.min(1.0, currentVolume + 0.1)
     setCurrentVolume(newVolume)
     if (videoRef.current) videoRef.current.volume = newVolume
-    showOverlay(setShowVolumeOverlay, 1500)
+    showOverlay(setShowVolumeOverlay, volumeOverlayTimeoutRef, 1500)
   }
 
   const volumeDown = () => {
@@ -255,11 +293,17 @@ function App() {
     const newVolume = Math.max(0, currentVolume - 0.1)
     setCurrentVolume(newVolume)
     if (videoRef.current) videoRef.current.volume = newVolume
-    showOverlay(setShowVolumeOverlay, 1500)
+    showOverlay(setShowVolumeOverlay, volumeOverlayTimeoutRef, 1500)
   }
 
   // Play static channel
   const playStaticChannel = () => {
+    clearPlaybackTimeout()
+    stopPlaybackSession()
+
+    const video = videoRef.current
+    if (!video) return
+
     const playlistUrl = aspectRatio === '4:3'
       ? '/channels/static-4x3/_.m3u8'
       : '/channels/static/_.m3u8'
@@ -276,10 +320,10 @@ function App() {
       })
 
       hls.loadSource(playlistUrl)
-      hls.attachMedia(videoRef.current)
+      hls.attachMedia(video)
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        videoRef.current.play().catch(err => console.log('Autoplay blocked:', err))
+        video.play().catch(err => console.log('Autoplay blocked:', err))
         setShowStatic(false)
       })
 
@@ -293,20 +337,19 @@ function App() {
       hlsRef.current = hls
 
       // Loop static video when it ends
-      const video = videoRef.current
       const handleStaticEnded = () => {
         video.currentTime = 0
         video.play().catch(() => {})
       }
-      video.addEventListener('ended', handleStaticEnded)
-    } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
-      videoRef.current.src = playlistUrl
-      videoRef.current.loop = true
-      videoRef.current.play().catch(err => console.log('Autoplay blocked:', err))
+      addEndedListener(video, handleStaticEnded)
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = playlistUrl
+      video.loop = true
+      video.play().catch(err => console.log('Autoplay blocked:', err))
       setShowStatic(false)
     }
 
-    videoRef.current.volume = currentVolume
+    video.volume = currentVolume
   }
 
   // Power toggle
@@ -316,11 +359,12 @@ function App() {
       setIsPoweredOn(false)
       setPowerAnimation('power-off')
 
-      setTimeout(() => {
-        if (hlsRef.current) {
-          hlsRef.current.destroy()
-          hlsRef.current = null
-        }
+      cancelChannelSwitch(channelSwitchTimeoutRef)
+      clearPlaybackTimeout()
+      removeEndedListener()
+      playbackTimeoutRef.current = setTimeout(() => {
+        playbackTimeoutRef.current = null
+        stopPlaybackSession()
         if (videoRef.current) videoRef.current.pause()
         setShowStatic(false)
         setCurrentChannelIndex(-1)
@@ -330,7 +374,9 @@ function App() {
       setIsPoweredOn(true)
       setPowerAnimation('power-on')
 
-      setTimeout(() => {
+      clearPlaybackTimeout()
+      playbackTimeoutRef.current = setTimeout(() => {
+        playbackTimeoutRef.current = null
         playStaticChannel()
       }, 500)
     }

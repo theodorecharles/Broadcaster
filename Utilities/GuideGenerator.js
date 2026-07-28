@@ -122,6 +122,7 @@ class GuideGenerator {
 
     // Check if previous day's last video extends past dayStart
     let scheduleStart = dayStart
+    let overlappingEntry = null
     const prevDayStart = dayStart - (24 * 60 * 60 * 1000)
     const prevGuide = this.loadGuideForDay(prevDayStart)
 
@@ -129,12 +130,13 @@ class GuideGenerator {
       const lastEntry = prevGuide.schedule[prevGuide.schedule.length - 1]
       if (lastEntry.endTime > dayStart) {
         scheduleStart = lastEntry.endTime
+        overlappingEntry = lastEntry
         Log(tag, `Previous video extends ${Math.round((lastEntry.endTime - dayStart) / 1000)}s past 3am`, this.channel)
       }
     }
 
     // Build schedule
-    const schedule = []
+    const schedule = overlappingEntry ? [{ ...overlappingEntry }] : []
     let currentTime = scheduleStart
     let shuffledVideos = shuffleArray(videos)
     let videoIndex = 0
@@ -251,16 +253,14 @@ class GuideGenerator {
     let entry = guide.schedule.find(e => e.startTime <= time && e.endTime > time)
     if (entry) return entry
 
-    // If not found and we're near the start of the day, check previous day
-    // (in case previous video extends past 3am)
+    // Check the previous day for guides generated before overlapping entries
+    // were carried forward. The overlap can last longer than one hour.
     const todayStart = getPrevious3am(time)
-    if (time - todayStart < 60 * 60 * 1000) { // Within first hour
-      const prevDayStart = todayStart - (24 * 60 * 60 * 1000)
-      const prevGuide = this.loadGuideForDay(prevDayStart)
-      if (prevGuide && prevGuide.schedule) {
-        entry = prevGuide.schedule.find(e => e.startTime <= time && e.endTime > time)
-        if (entry) return entry
-      }
+    const prevDayStart = todayStart - (24 * 60 * 60 * 1000)
+    const prevGuide = this.loadGuideForDay(prevDayStart)
+    if (prevGuide && prevGuide.schedule) {
+      entry = prevGuide.schedule.find(e => e.startTime <= time && e.endTime > time)
+      if (entry) return entry
     }
 
     return null

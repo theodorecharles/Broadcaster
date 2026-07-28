@@ -42,10 +42,12 @@ function migrateExistingVideos(channelSlug) {
                 if (playlistContent.includes('#EXT-X-ENDLIST')) {
                     // Calculate duration from playlist
                     let duration = 0
+                    let segmentCount = 0
                     playlistContent.split('\n').forEach(line => {
                         if (line.startsWith('#EXTINF:')) {
                             const match = line.match(/#EXTINF:([\d.]+)/)
                             if (match) duration += parseFloat(match[1])
+                            segmentCount++
                         }
                     })
 
@@ -63,7 +65,7 @@ function migrateExistingVideos(channelSlug) {
                     }
 
                     // Mark as transcoded
-                    db.markVideoTranscoded(video.hash, duration, videoCodec, audioCodec, width, height)
+                    db.markVideoTranscoded(video.id, duration, segmentCount, videoCodec, audioCodec, width, height)
                     migratedCount++
                 }
             } catch (err) {

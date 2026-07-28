@@ -108,6 +108,20 @@ class TelevisionUI {
     // Copy static.gif
     fs.copyFileSync(path.join(__dirname, 'static.gif'), path.join(CACHE_DIR, 'static.gif'))
 
+    // Report background startup failures without taking down the web UI
+    this.app.get('/healthz', function(req, res) {
+        const startup = channelPool.getStartupStatus()
+        const degraded = startup.state === 'degraded'
+
+        res.status(degraded ? 503 : 200).json({
+            ok: !degraded,
+            service: 'broadcaster',
+            timestamp: new Date().toISOString(),
+            deploy_id: process.env.DEPLOY_ID || null,
+            status: startup.state
+        })
+    })
+
     // Serve static files with no-cache for .ts segments
     this.app.use(express.static(CACHE_DIR, {
         setHeaders: (res, filePath) => {
