@@ -110,7 +110,7 @@ class PreGenerator {
             // Database is out of sync - mark as not transcoded
             Log(tag, `Database out of sync for ${fileName} - marking as not transcoded`)
             try {
-                db.db.prepare('UPDATE videos SET transcoded = 0 WHERE hash = ?').run(videoHash)
+                db.markVideoNotTranscoded(video.id)
             } catch (e) {
                 Log(tag, `Failed to update database: ${e.message}`)
             }
@@ -130,7 +130,7 @@ class PreGenerator {
             // If we have a playlist but no segments, it's incomplete
             if (segmentFiles.length === 0) {
                 Log(tag, `Incomplete generation detected for ${fileName} - no segments found`)
-                db.db.prepare('UPDATE videos SET transcoded = 0 WHERE hash = ?').run(videoHash)
+                db.markVideoNotTranscoded(video.id)
                 this.deletePartialGeneration(outputDir, fileName)
                 return false
             }
@@ -139,7 +139,7 @@ class PreGenerator {
             const playlistContent = fs.readFileSync(playlistPath, 'utf8')
             if (!playlistContent.includes('#EXT-X-ENDLIST')) {
                 Log(tag, `Incomplete generation detected for ${fileName} - playlist not finalized`)
-                db.db.prepare('UPDATE videos SET transcoded = 0 WHERE hash = ?').run(videoHash)
+                db.markVideoNotTranscoded(video.id)
                 this.deletePartialGeneration(outputDir, fileName)
                 return false
             }
@@ -149,7 +149,7 @@ class PreGenerator {
             for (const segmentRef of segmentRefs) {
                 if (!fs.existsSync(path.join(outputDir, segmentRef))) {
                     Log(tag, `Incomplete generation detected for ${fileName} - missing segment ${segmentRef}`)
-                    db.db.prepare('UPDATE videos SET transcoded = 0 WHERE hash = ?').run(videoHash)
+                    db.markVideoNotTranscoded(video.id)
                     this.deletePartialGeneration(outputDir, fileName)
                     return false
                 }
@@ -159,7 +159,7 @@ class PreGenerator {
             const metadataPath = path.join(outputDir, 'metadata.json')
             if (!fs.existsSync(metadataPath)) {
                 Log(tag, `Incomplete generation detected for ${fileName} - missing metadata.json`)
-                db.db.prepare('UPDATE videos SET transcoded = 0 WHERE hash = ?').run(videoHash)
+                db.markVideoNotTranscoded(video.id)
                 this.deletePartialGeneration(outputDir, fileName)
                 return false
             }
@@ -302,6 +302,7 @@ class PreGenerator {
             } else {
                 // Not transcoded yet, needs transcoding
                 channelQueue.push({
+                    videoId: video.id,
                     filePath: video.file_path,
                     channel
                 })
@@ -376,7 +377,7 @@ class PreGenerator {
     /**
      * Generate HLS files for a single video
      */
-    generateVideo(filePath, channel) {
+    generateVideo(videoId, filePath, channel) {
         return new Promise((resolve, reject) => {
             const videoHash = this.getVideoHash(filePath)
             const outputDir = path.join(CACHE_DIR, 'channels', channel.slug, 'videos', videoHash)
@@ -500,7 +501,7 @@ class PreGenerator {
                     try {
                         const db = Database()
                         db.markVideoTranscoded(
-                            videoHash,
+                            videoId,
                             videoDuration,
                             segmentCount,
                             videoInfo.codec,
@@ -580,7 +581,7 @@ class PreGenerator {
         for (const item of this.generationQueue) {
             this.currentIndex++
             try {
-                await this.generateVideo(item.filePath, item.channel)
+                await this.generateVideo(item.videoId, item.filePath, item.channel)
             } catch (err) {
                 Log(tag, `Skipping failed video: ${item.filePath}`)
             }

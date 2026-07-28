@@ -127,7 +127,7 @@ class DatabaseManager {
     /**
      * Update video transcoding status
      */
-    markVideoTranscoded(hash, durationSeconds, segmentCount, videoCodec, audioCodec, width, height) {
+    markVideoTranscoded(videoId, durationSeconds, segmentCount, videoCodec, audioCodec, width, height) {
         const stmt = this.db.prepare(`
             UPDATE videos SET
                 transcoded = 1,
@@ -138,9 +138,19 @@ class DatabaseManager {
                 audio_codec = ?,
                 width = ?,
                 height = ?
-            WHERE hash = ?
+            WHERE id = ?
         `)
-        return stmt.run(durationSeconds, segmentCount, videoCodec, audioCodec, width, height, hash)
+        return stmt.run(durationSeconds, segmentCount, videoCodec, audioCodec, width, height, videoId)
+    }
+
+    /**
+     * Reset video transcoding status
+     */
+    markVideoNotTranscoded(videoId) {
+        return this.db.prepare(`
+            UPDATE videos SET transcoded = 0
+            WHERE id = ?
+        `).run(videoId)
     }
 
     /**
