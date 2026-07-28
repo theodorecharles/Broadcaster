@@ -85,6 +85,30 @@ class PreGenerator {
     }
 
     /**
+     * Reset a database-positive video whose cached HLS output is incomplete
+     */
+    markGenerationIncomplete(db, video, outputDir, fileName, reason) {
+        Log(tag, `${reason} for ${fileName} - marking as not transcoded`)
+        try {
+            // Use the channel-scoped row returned by getVideoByPath. The same
+            // source file can belong to more than one channel.
+            db.db.prepare(`
+                UPDATE videos
+                SET transcoded = 0, segment_count = NULL
+                WHERE id = ?
+            `).run(video.id)
+        } catch (e) {
+            Log(tag, `Failed to update database: ${e.message}`)
+        }
+
+        if (fs.existsSync(outputDir)) {
+            this.deletePartialGeneration(outputDir, fileName)
+        }
+
+        return false
+    }
+
+    /**
      * Check if HLS files already exist for this video and are complete
      * OPTIMIZED: Check database first before filesystem
      */
@@ -107,19 +131,13 @@ class PreGenerator {
 
         // Check if playlist exists
         if (!fs.existsSync(playlistPath)) {
-            // Database is out of sync - mark as not transcoded
-            Log(tag, `Database out of sync for ${fileName} - marking as not transcoded`)
-            try {
-                db.markVideoNotTranscoded(video.id)
-            } catch (e) {
-                Log(tag, `Failed to update database: ${e.message}`)
-            }
-
-            // If directory exists but no playlist, it's incomplete - delete it
-            if (fs.existsSync(outputDir)) {
-                this.deletePartialGeneration(outputDir, fileName)
-            }
-            return false
+            return this.markGenerationIncomplete(
+                db,
+                video,
+                outputDir,
+                fileName,
+                'Database out of sync'
+            )
         }
 
         // Check if there are actual segment files
@@ -129,44 +147,62 @@ class PreGenerator {
 
             // If we have a playlist but no segments, it's incomplete
             if (segmentFiles.length === 0) {
-                Log(tag, `Incomplete generation detected for ${fileName} - no segments found`)
-                db.markVideoNotTranscoded(video.id)
-                this.deletePartialGeneration(outputDir, fileName)
-                return false
+                return this.markGenerationIncomplete(
+                    db,
+                    video,
+                    outputDir,
+                    fileName,
+                    'Incomplete generation detected - no segments found'
+                )
             }
 
             // Check if playlist is complete (has #EXT-X-ENDLIST)
             const playlistContent = fs.readFileSync(playlistPath, 'utf8')
             if (!playlistContent.includes('#EXT-X-ENDLIST')) {
-                Log(tag, `Incomplete generation detected for ${fileName} - playlist not finalized`)
-                db.markVideoNotTranscoded(video.id)
-                this.deletePartialGeneration(outputDir, fileName)
-                return false
+                return this.markGenerationIncomplete(
+                    db,
+                    video,
+                    outputDir,
+                    fileName,
+                    'Incomplete generation detected - playlist not finalized'
+                )
             }
 
             // Verify all segments referenced in playlist exist
             const segmentRefs = playlistContent.match(/segment_\d+\.ts/g) || []
             for (const segmentRef of segmentRefs) {
                 if (!fs.existsSync(path.join(outputDir, segmentRef))) {
-                    Log(tag, `Incomplete generation detected for ${fileName} - missing segment ${segmentRef}`)
-                    db.markVideoNotTranscoded(video.id)
-                    this.deletePartialGeneration(outputDir, fileName)
-                    return false
+                    return this.markGenerationIncomplete(
+                        db,
+                        video,
+                        outputDir,
+                        fileName,
+                        `Incomplete generation detected - missing segment ${segmentRef}`
+                    )
                 }
             }
 
             // Verify metadata.json exists - it's only written after successful transcoding
             const metadataPath = path.join(outputDir, 'metadata.json')
             if (!fs.existsSync(metadataPath)) {
-                Log(tag, `Incomplete generation detected for ${fileName} - missing metadata.json`)
-                db.markVideoNotTranscoded(video.id)
-                this.deletePartialGeneration(outputDir, fileName)
-                return false
+                return this.markGenerationIncomplete(
+                    db,
+                    video,
+                    outputDir,
+                    fileName,
+                    'Incomplete generation detected - missing metadata.json'
+                )
             }
 
             return true
         } catch (e) {
-            return false
+            return this.markGenerationIncomplete(
+                db,
+                video,
+                outputDir,
+                fileName,
+                `Failed to verify cached generation - ${e.message}`
+            )
         }
     }
 
@@ -296,11 +332,14 @@ class PreGenerator {
         let skippedCount = 0
 
         allVideos.forEach(video => {
-            // Fast Set lookup instead of database query per video
-            if (transcodedPaths.has(video.file_path)) {
+            // Database-positive rows still need their cached files verified.
+            if (
+                transcodedPaths.has(video.file_path) &&
+                this.isAlreadyGenerated(video.file_path, channel.slug)
+            ) {
                 skippedCount++
             } else {
-                // Not transcoded yet, needs transcoding
+                // Not transcoded or cache is incomplete, needs transcoding
                 channelQueue.push({
                     videoId: video.id,
                     filePath: video.file_path,
