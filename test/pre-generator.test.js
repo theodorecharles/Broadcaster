@@ -209,3 +209,60 @@ test('persisted guide cannot emit deleted segment URLs after restart', t => {
     assert.match(playlist, /#EXT-X-ENDLIST/)
     assert.doesNotMatch(playlist, /segment_\d+\.ts/)
 })
+
+test('stopActiveWorkers SIGTERMs then SIGKILLs tracked ffmpeg children', () => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/news.mkv', []))
+
+    const signals = []
+    const fakeChild = {
+        exitCode: null,
+        signalCode: null,
+        kill(sig) {
+            signals.push(sig)
+            if (sig === 'SIGKILL') {
+                this.signalCode = 'SIGKILL'
+            }
+        }
+    }
+
+    preGenerator.activeProcesses.add(fakeChild)
+    preGenerator.generationQueue = [{ videoId: 1, filePath: '/x', channel: { slug: 'news' } }]
+    preGenerator.isGenerating = true
+
+    preGenerator.stopActiveWorkers()
+
+    assert.deepEqual(signals, ['SIGTERM', 'SIGKILL'])
+    assert.equal(preGenerator.activeProcesses.size, 0)
+    assert.deepEqual(preGenerator.generationQueue, [])
+    assert.equal(preGenerator.isGenerating, false)
+    assert.equal(preGenerator.shuttingDown, true)
+})
+
+test('stopActiveWorkers is a no-op when no workers are active', () => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/news.mkv', []))
+
+    assert.doesNotThrow(() => preGenerator.stopActiveWorkers())
+    assert.equal(preGenerator.activeProcesses.size, 0)
+    assert.equal(preGenerator.shuttingDown, true)
+})
+
+test('stopActiveWorkers skips kill when process already exited', () => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/news.mkv', []))
+
+    let killCalls = 0
+    preGenerator.activeProcesses.add({
+        exitCode: 0,
+        signalCode: null,
+        kill() {
+            killCalls++
+        }
+    })
+
+    preGenerator.stopActiveWorkers()
+
+    assert.equal(killCalls, 0)
+    assert.equal(preGenerator.activeProcesses.size, 0)
+})

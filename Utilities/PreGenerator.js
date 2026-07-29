@@ -58,6 +58,45 @@ class PreGenerator {
         this.currentIndex = 0
         this.totalVideos = 0
         this.isGenerating = false
+        /** @type {Set<import('child_process').ChildProcess>} */
+        this.activeProcesses = new Set()
+        this.shuttingDown = false
+    }
+
+    /**
+     * Kill in-flight ffmpeg workers (SIGTERM then SIGKILL) and stop the queue.
+     * Called from process shutdown hooks so Ctrl-C / pm2 stop do not orphan encoders.
+     */
+    stopActiveWorkers() {
+        this.shuttingDown = true
+        this.generationQueue = []
+
+        const procs = [...this.activeProcesses]
+        for (const proc of procs) {
+            try {
+                if (proc.exitCode === null && proc.signalCode === null) {
+                    proc.kill('SIGTERM')
+                }
+            } catch (_) {
+                // Process may already be gone
+            }
+        }
+        for (const proc of procs) {
+            try {
+                if (proc.exitCode === null && proc.signalCode === null) {
+                    proc.kill('SIGKILL')
+                }
+            } catch (_) {
+                // Process may already be gone
+            }
+        }
+
+        this.activeProcesses.clear()
+        this.isGenerating = false
+
+        if (procs.length > 0) {
+            Log(tag, `Stopped ${procs.length} in-flight ffmpeg worker(s)`)
+        }
     }
 
     /**
@@ -495,6 +534,11 @@ class PreGenerator {
             ]
 
             const ffmpeg = spawn('ffmpeg', args)
+            this.activeProcesses.add(ffmpeg)
+            const untrack = () => this.activeProcesses.delete(ffmpeg)
+            ffmpeg.once('close', untrack)
+            ffmpeg.once('error', untrack)
+
             const startTime = Date.now()
             let stderrData = ''
 
@@ -503,6 +547,10 @@ class PreGenerator {
             })
 
             ffmpeg.on('close', (code) => {
+                if (this.shuttingDown) {
+                    reject(new Error('FFmpeg stopped during shutdown'))
+                    return
+                }
                 if (code === 0) {
                     const duration = (Date.now() - startTime) / 1000
                     Log(tag, `Generated ${path.basename(filePath)} in ${duration.toFixed(1)}s [${this.currentIndex}/${this.totalVideos}]`, channel)
@@ -618,16 +666,26 @@ class PreGenerator {
         Log(tag, `Starting generation of ${this.totalVideos} videos (round-robin across channels)...`)
 
         for (const item of this.generationQueue) {
+            if (this.shuttingDown) {
+                break
+            }
             this.currentIndex++
             try {
                 await this.generateVideo(item.videoId, item.filePath, item.channel)
             } catch (err) {
+                if (this.shuttingDown) {
+                    break
+                }
                 Log(tag, `Skipping failed video: ${item.filePath}`)
             }
         }
 
         this.isGenerating = false
-        Log(tag, `Generation complete! Processed ${this.totalVideos} videos.`)
+        if (this.shuttingDown) {
+            Log(tag, 'Generation stopped during shutdown')
+        } else {
+            Log(tag, `Generation complete! Processed ${this.totalVideos} videos.`)
+        }
     }
 
     /**
