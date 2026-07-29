@@ -4,6 +4,7 @@ const { Channel } = require('./Classes/Channel.js')
 const PreGenerator = require('./Utilities/PreGenerator.js')
 const { migrateAll, backfillDurations } = require('./Utilities/MigrateDatabase.js')
 const Log = require('./Utilities/Log.js')
+const { flushOrchLogs } = require('./Utilities/OrchLogShipper.js')
 const tag = "Main"
 const fs = require('fs')
 const path = require('path')
@@ -26,8 +27,17 @@ const cleanup = () => {
   Log(tag, 'Bye now.')
 }
 
-const shutdown = () => {
+const shutdown = async () => {
   cleanup()
+  // Ship the buffered tail before exiting; never let a stuck POST block the stop.
+  try {
+    await Promise.race([
+      flushOrchLogs(),
+      new Promise(resolve => setTimeout(resolve, 5000))
+    ])
+  } catch (e) {
+    // Shutdown continues regardless of log delivery.
+  }
   process.exit(0)
 }
 
