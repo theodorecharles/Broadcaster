@@ -165,6 +165,118 @@ test('skips a database-positive video when the cached generation is complete', t
     assert.deepEqual(updates, [])
 })
 
+test('resolveEncodeSettings passes VIDEO_CODEC for videotoolbox, qsv, and libx264', t => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/news.mkv', []))
+    const resolve = preGenerator.resolveEncodeSettings
+
+    for (const codec of ['h264_videotoolbox', 'h264_qsv', 'libx264']) {
+        const settings = resolve({
+            hasGPU: false,
+            canUseGPU: false,
+            is10Bit: false,
+            width: '640',
+            filePath: '/library/news.mkv',
+            videoCodecConfig: codec,
+            videoPreset: codec === 'libx264' ? 'faster' : 'medium',
+            videoCrf: '20',
+            videoFilter: 'yadif'
+        })
+        assert.equal(settings.videoCodec, codec)
+        assert.equal(settings.videoPreset, codec === 'libx264' ? 'faster' : 'medium')
+        assert.deepEqual(settings.qualityArgs, ['-crf', '20'])
+        assert.equal(settings.inputArgs[0], '-i')
+        assert.match(settings.fullVideoFilter, /yadif,scale=640:-2/)
+    }
+})
+
+test('resolveEncodeSettings uses full NVENC path when canUseGPU', t => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/news.mkv', []))
+    const settings = preGenerator.resolveEncodeSettings({
+        hasGPU: true,
+        canUseGPU: true,
+        is10Bit: false,
+        width: '1280',
+        filePath: '/library/news.mkv',
+        videoCodecConfig: 'h264_nvenc',
+        videoPreset: 'p5',
+        videoCrf: '22',
+        videoFilter: 'yadif'
+    })
+    assert.equal(settings.videoCodec, 'h264_nvenc')
+    assert.equal(settings.videoPreset, 'p5')
+    assert.deepEqual(settings.qualityArgs, ['-cq', '22', '-rc', 'vbr', '-b:v', '0'])
+    assert.deepEqual(settings.inputArgs.slice(0, 4), [
+        '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda'
+    ])
+    assert.match(settings.fullVideoFilter, /yadif_cuda,scale_cuda=1280:-2/)
+})
+
+test('resolveEncodeSettings hybrid NVENC when GPU present but canUseGPU false', t => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/news.mkv', []))
+    const settings = preGenerator.resolveEncodeSettings({
+        hasGPU: true,
+        canUseGPU: false,
+        is10Bit: true,
+        width: '640',
+        filePath: '/library/hdr.mkv',
+        videoCodecConfig: 'h264_nvenc',
+        videoPreset: undefined,
+        videoCrf: undefined,
+        videoFilter: 'yadif'
+    })
+    assert.equal(settings.videoCodec, 'h264_nvenc')
+    assert.equal(settings.videoPreset, 'p4')
+    assert.deepEqual(settings.qualityArgs, ['-cq', '23', '-rc', 'vbr', '-b:v', '0'])
+    assert.deepEqual(settings.inputArgs, ['-i', '/library/hdr.mkv'])
+})
+
+test('resolveEncodeSettings falls back to libx264 when NVENC requested without GPU', t => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/news.mkv', []))
+    const settings = preGenerator.resolveEncodeSettings({
+        hasGPU: false,
+        canUseGPU: false,
+        is10Bit: false,
+        width: '640',
+        filePath: '/library/news.mkv',
+        videoCodecConfig: 'h264_nvenc',
+        videoPreset: undefined,
+        videoCrf: '23',
+        videoFilter: 'yadif'
+    })
+    assert.equal(settings.videoCodec, 'libx264')
+    assert.equal(settings.videoPreset, 'veryfast')
+    assert.deepEqual(settings.qualityArgs, ['-crf', '23'])
+})
+
+test('resolveEncodeSettings does not force NVENC when another codec is configured on a GPU host', t => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/news.mkv', []))
+    const settings = preGenerator.resolveEncodeSettings({
+        hasGPU: true,
+        canUseGPU: false,
+        is10Bit: false,
+        width: '640',
+        filePath: '/library/news.mkv',
+        videoCodecConfig: 'h264_videotoolbox',
+        videoPreset: 'fast',
+        videoCrf: '18',
+        videoFilter: ''
+    })
+    assert.equal(settings.videoCodec, 'h264_videotoolbox')
+    assert.equal(settings.videoPreset, 'fast')
+    assert.deepEqual(settings.qualityArgs, ['-crf', '18'])
+    assert.equal(settings.fullVideoFilter, 'scale=640:-2')
+})
+
 test('persisted guide cannot emit deleted segment URLs after restart', t => {
     const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
     t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
