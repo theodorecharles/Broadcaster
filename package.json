@@ -25,10 +25,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/theodoreroddy/Broadcaster.git"
+    "url": "git+https://github.com/theodorecharles/Broadcaster.git"
   },
   "bugs": {
-    "url": "https://github.com/theodoreroddy/Broadcaster/issues"
+    "url": "https://github.com/theodorecharles/Broadcaster/issues"
   },
-  "homepage": "https://github.com/theodoreroddy/Broadcaster#readme"
+  "homepage": "https://github.com/theodorecharles/Broadcaster#readme"
 }

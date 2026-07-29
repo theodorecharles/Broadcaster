@@ -7,13 +7,13 @@
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/theodoreroddy/Broadcaster/issues</Support>
-  <Project>https://github.com/theodoreroddy/Broadcaster</Project>
+  <Support>https://github.com/theodorecharles/Broadcaster/issues</Support>
+  <Project>https://github.com/theodorecharles/Broadcaster</Project>
   <Overview>Broadcaster generates and hosts HTTP Live Streams from local content using FFMpeg with NVIDIA GPU hardware acceleration. Create your own 24/7 TV channels from your media library with a retro CRT-style web interface.</Overview>
   <Category>MediaApp:Video</Category>
   <WebUI>http://[IP]:[PORT:12121]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/theodoreroddy/Broadcaster/master/unraid-template.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/theodoreroddy/Broadcaster/master/icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/theodorecharles/Broadcaster/master/unraid-template.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/theodorecharles/Broadcaster/master/icon.png</Icon>
   <ExtraParams>--runtime=nvidia</ExtraParams>
   <PostArgs/>
   <CPUset/>

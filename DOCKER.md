@@ -374,4 +374,4 @@ deploy:
 For issues, please check:
 1. Docker logs: `docker-compose logs`
 2. Application logs: `./logs/`
-3. GitHub Issues: https://github.com/theodoreroddy/Broadcaster/issues
+3. GitHub Issues: https://github.com/theodorecharles/Broadcaster/issues

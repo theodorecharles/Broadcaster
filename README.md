@@ -17,7 +17,7 @@ The web UI is available immediately at startup, but channels won't appear until 
 
 Clone the repository:
 ```
-git clone https://github.com/theodoreroddy/Broadcaster.git
+git clone https://github.com/theodorecharles/Broadcaster.git
 ```
 
 Change into the Broadcaster directory and run `npm install`:
