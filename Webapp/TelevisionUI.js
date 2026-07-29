@@ -4,6 +4,7 @@ const Database = require('../Utilities/Database.js')
 const { getPrevious3am } = require('../Utilities/GuideGenerator.js')
 const tag = 'TelevisionUI'
 const compression = require('compression')
+const { mountPublicStatic } = require('./staticAssets.js')
 
 const { WEB_UI_PORT,
         M3U8_MAX_AGE,
@@ -58,6 +59,23 @@ function scheduleDaily3amRegeneration() {
     }, msUntil3am)
 }
 
+// Client-facing payloads must never include absolute host filesystem paths.
+function buildDebugVideoPayload(videoInfo) {
+    if (!videoInfo) return null
+    return {
+        transcoded: videoInfo.transcoded === 1,
+        duration: videoInfo.duration_seconds,
+        segmentCount: videoInfo.segment_count
+    }
+}
+
+function buildManifestEntryPayload(info) {
+    return {
+        filename: info.filename,
+        addedAt: info.addedAt ? new Date(info.addedAt).toISOString() : null
+    }
+}
+
 // Build combined guide from all channels for API response
 function buildCombinedGuide() {
     const guide = {
@@ -93,21 +111,6 @@ class TelevisionUI {
 
   start(channelPool) {
 
-    // Create directories and copy static files
-    const channelsDir = path.join(CACHE_DIR, 'channels')
-
-    fs.mkdirSync(channelsDir, { recursive: true })
-
-    // Copy static directories (16:9 and 4:3 versions)
-    fs.cpSync(path.join(__dirname, 'static'), path.join(channelsDir, 'static'), { recursive: true })
-    fs.cpSync(path.join(__dirname, 'static-4x3'), path.join(channelsDir, 'static-4x3'), { recursive: true })
-
-    // Copy built React app (dist folder)
-    fs.cpSync(path.join(__dirname, 'dist'), CACHE_DIR, { recursive: true, force: true })
-
-    // Copy static.gif
-    fs.copyFileSync(path.join(__dirname, 'static.gif'), path.join(CACHE_DIR, 'static.gif'))
-
     // Report background startup failures without taking down the web UI
     this.app.get('/healthz', function(req, res) {
         const startup = channelPool.getStartupStatus()
@@ -122,14 +125,8 @@ class TelevisionUI {
         })
     })
 
-    // Serve static files with no-cache for .ts segments
-    this.app.use(express.static(CACHE_DIR, {
-        setHeaders: (res, filePath) => {
-            if (filePath.endsWith('.ts')) {
-                res.set('Cache-Control', 'no-store')
-            }
-        }
-    }))
+    // UI + HLS only — DB/history/manifests are not under the static root
+    mountPublicStatic(this.app, CACHE_DIR, __dirname)
     this.app.use(compression())
 
     // Dynamic manifest - always reflects current channelPool state
@@ -223,12 +220,7 @@ class TelevisionUI {
                 offsetInVideo: Math.round((now - currentEntry.startTime) / 1000),
                 duration: currentEntry.duration
             } : null,
-            videoInDatabase: videoInfo ? {
-                filePath: videoInfo.file_path,
-                transcoded: videoInfo.transcoded === 1,
-                duration: videoInfo.duration_seconds,
-                segmentCount: videoInfo.segment_count
-            } : null
+            videoInDatabase: buildDebugVideoPayload(videoInfo)
         })
     })
 
@@ -283,11 +275,7 @@ class TelevisionUI {
             const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
             const result = {}
             for (const [hash, info] of Object.entries(manifest)) {
-                result[hash] = {
-                    filename: info.filename,
-                    originalPath: info.originalPath,
-                    addedAt: info.addedAt ? new Date(info.addedAt).toISOString() : null
-                }
+                result[hash] = buildManifestEntryPayload(info)
             }
             res.json(result)
         } catch (e) {
@@ -348,3 +336,5 @@ module.exports = () => {
 
 // Export for external use
 module.exports.regenerateAllGuides = regenerateAllGuides
+module.exports.buildDebugVideoPayload = buildDebugVideoPayload
+module.exports.buildManifestEntryPayload = buildManifestEntryPayload

@@ -23,6 +23,9 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0"
   },
+  "overrides": {
+    "path-to-regexp": ">=8.4.0"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/theodorecharles/Broadcaster.git"
