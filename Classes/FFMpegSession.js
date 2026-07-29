@@ -16,6 +16,18 @@ const { VIDEO_CODEC,
 let hasNvidiaGPU = false
 let gpuCheckDone = false
 
+/**
+ * VIDEO_FILTER of yadif or yadif_cuda both request deinterlace.
+ * CUDA vs CPU filter is chosen from the active encode path, not the env string alone.
+ * @param {string|undefined} videoFilter
+ * @param {boolean} useCuda
+ * @returns {string} filter prefix ending in comma, or empty string
+ */
+function deinterlacePrefix(videoFilter, useCuda) {
+    if (videoFilter !== 'yadif' && videoFilter !== 'yadif_cuda') return ''
+    return useCuda ? 'yadif_cuda,' : 'yadif,'
+}
+
 function checkNvidiaGPU() {
     if (gpuCheckDone) return hasNvidiaGPU
 
@@ -66,17 +78,17 @@ function buildFFmpegArgs(file, output, channel) {
         // NVENC presets: p1 (fastest) to p7 (slowest/best quality)
         videoPreset = VIDEO_PRESET || 'p4'
         // Full CUDA filter chain - keeps everything on GPU
-        const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif_cuda,' : ''
-        videoFilter = `${deinterlace}scale_cuda=${width}:${height},hwdownload,format=nv12`
+        videoFilter = `${deinterlacePrefix(VIDEO_FILTER, true)}scale_cuda=${width}:${height},hwdownload,format=nv12`
     } else if (!useGPU && VIDEO_CODEC === 'h264_nvenc') {
         // Fallback to software encoding if NVENC requested but GPU not available
         videoCodec = 'libx264'
         videoPreset = 'veryfast'
-        videoFilter = `yadif,scale=${DIMENSIONS}`
+        videoFilter = `${deinterlacePrefix(VIDEO_FILTER, false) || 'yadif,'}scale=${DIMENSIONS}`
         Log(tag, 'GPU requested but not available - falling back to software encoding', channel)
     } else {
-        // CPU encoding path
-        videoFilter = `${VIDEO_FILTER},scale=${DIMENSIONS}`
+        // CPU encoding path — yadif_cuda is not available on CPU, map to yadif
+        const cpuFilter = VIDEO_FILTER === 'yadif_cuda' ? 'yadif' : VIDEO_FILTER
+        videoFilter = `${cpuFilter},scale=${DIMENSIONS}`
     }
 
     // Build encoding args
@@ -163,5 +175,6 @@ function FFMpegSession(channel) {
 }
 
 module.exports = {
-    FFMpegSession: FFMpegSession
+    FFMpegSession: FFMpegSession,
+    deinterlacePrefix
 }

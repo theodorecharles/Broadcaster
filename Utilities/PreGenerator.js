@@ -20,6 +20,18 @@ const { CACHE_DIR,
 let hasNvidiaGPU = false
 let gpuCheckDone = false
 
+/**
+ * VIDEO_FILTER of yadif or yadif_cuda both request deinterlace.
+ * CUDA vs CPU filter is chosen from the active encode path, not the env string alone.
+ * @param {string|undefined} videoFilter
+ * @param {boolean} useCuda
+ * @returns {string} filter prefix ending in comma, or empty string
+ */
+function deinterlacePrefix(videoFilter, useCuda) {
+    if (videoFilter !== 'yadif' && videoFilter !== 'yadif_cuda') return ''
+    return useCuda ? 'yadif_cuda,' : 'yadif,'
+}
+
 function checkNvidiaGPU() {
     if (gpuCheckDone) return hasNvidiaGPU
 
@@ -450,16 +462,14 @@ class PreGenerator {
                 videoPreset = VIDEO_PRESET || 'p4'
                 qualityArgs = ['-cq', VIDEO_CRF || '23', '-rc', 'vbr', '-b:v', '0']
                 // Scale to width, maintain aspect ratio (height = -2 ensures divisible by 2)
-                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif_cuda,' : ''
-                fullVideoFilter = `${deinterlace}scale_cuda=${width}:-2,hwdownload,format=nv12`
+                fullVideoFilter = `${deinterlacePrefix(VIDEO_FILTER, true)}scale_cuda=${width}:-2,hwdownload,format=nv12`
             } else if (hasGPU && VIDEO_CODEC === 'h264_nvenc') {
                 // Hybrid path: CPU decode + CPU filters + NVENC encode (for incompatible files)
                 inputArgs = ['-i', filePath]
                 videoCodec = 'h264_nvenc'
                 videoPreset = VIDEO_PRESET || 'p4'
                 qualityArgs = ['-cq', VIDEO_CRF || '23', '-rc', 'vbr', '-b:v', '0']
-                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif,' : ''
-                fullVideoFilter = `${deinterlace}scale=${width}:-2`
+                fullVideoFilter = `${deinterlacePrefix(VIDEO_FILTER, false)}scale=${width}:-2`
                 Log(tag, `Using CPU decode for ${path.basename(filePath)} (${is10Bit ? '10-bit' : 'incompatible codec'})`, channel)
             } else {
                 // Full CPU path
@@ -467,8 +477,7 @@ class PreGenerator {
                 videoCodec = 'libx264'
                 videoPreset = VIDEO_PRESET || 'veryfast'
                 qualityArgs = ['-crf', VIDEO_CRF || '23']
-                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif,' : ''
-                fullVideoFilter = `${deinterlace}scale=${width}:-2`
+                fullVideoFilter = `${deinterlacePrefix(VIDEO_FILTER, false)}scale=${width}:-2`
             }
 
             // Determine audio handling - copy if already AAC, otherwise re-encode
@@ -646,3 +655,4 @@ class PreGenerator {
 }
 
 module.exports = new PreGenerator()
+module.exports.deinterlacePrefix = deinterlacePrefix
