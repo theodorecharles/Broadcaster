@@ -1,5 +1,6 @@
 const express = require('express')
 const Log = require('../Utilities/Log.js')
+const { newCorrelationId } = require('../Utilities/LogContext.js')
 const Database = require('../Utilities/Database.js')
 const { getPrevious3am } = require('../Utilities/GuideGenerator.js')
 const tag = 'TelevisionUI'
@@ -123,6 +124,14 @@ class TelevisionUI {
             deploy_id: process.env.DEPLOY_ID || null,
             status: startup.state
         })
+    })
+
+    // Correlation id per request: error lines logged while serving a request carry it, and the
+    // client gets it back in a header so a reported failure can be tied to the log entry.
+    this.app.use(function(req, res, next) {
+        req.correlationId = newCorrelationId()
+        res.setHeader('X-Request-Id', req.correlationId)
+        next()
     })
 
     // UI + HLS only — DB/history/manifests are not under the static root
@@ -312,7 +321,12 @@ class TelevisionUI {
                 res.send(playlist)
 
             } catch(e) {
-                Log(tag, `Couldn't return m3u8:\n` + e, channel)
+                Log(tag, `Couldn't return m3u8: ${e.message}`, channel, {
+                    error: e,
+                    correlation_id: req.correlationId,
+                    route: req.originalUrl,
+                    channel_slug: slug
+                })
                 res.statusCode = 500
                 res.send('')
             }

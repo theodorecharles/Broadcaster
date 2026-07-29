@@ -305,7 +305,7 @@ class PlaylistManager {
             this.segmentCache.set(videoHash, segments)
             return segments
         } catch (err) {
-            Log(tag, `Could not read segment durations for ${videoHash}: ${err.message}`, this.channel)
+            Log(tag, `Could not read segment durations for ${videoHash}: ${err.message}`, this.channel, { error: err, video_hash: videoHash })
             return []
         }
     }
@@ -464,7 +464,7 @@ class PlaylistManager {
                 return JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
             }
         } catch (err) {
-            Log(tag, `Error loading manifest: ${err.message}`, this.channel)
+            Log(tag, `Error loading manifest: ${err.message}`, this.channel, { error: err, manifest_path: manifestPath })
         }
         return {}
     }

@@ -110,7 +110,7 @@ class GuideGenerator {
         return guide
       }
     } catch (err) {
-      Log(tag, `Error loading guide: ${err.message}`, this.channel)
+      Log(tag, `Error loading guide: ${err.message}`, this.channel, { error: err, guide_path: filePath })
     }
     return null
   }
