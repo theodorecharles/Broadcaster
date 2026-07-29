@@ -22,7 +22,7 @@ const cleanup = () => {
   try {
     PreGenerator.stopActiveWorkers()
   } catch (e) {
-    Log(tag, `Error stopping ffmpeg workers: ${e}`)
+    Log(tag, `Error stopping ffmpeg workers: ${e.message}`, undefined, { error: e, phase: 'cleanup' })
   }
   Log(tag, 'Bye now.')
 }
@@ -69,7 +69,7 @@ function loadChannels() {
     Log(tag, `Found ${channels.length} channel definition${channels.length > 1 ? 's' : ''}:`)
     return channels
   } catch (e) {
-    Log(tag, `Error loading channels.json: ${e}`)
+    Log(tag, `Error loading channels.json: ${e.message}`, undefined, { error: e, channels_path: channelsPath })
     return []
   }
 }
@@ -104,7 +104,7 @@ async function startup() {
     uiStarted = true
     Log(tag, 'Web UI started and ready')
   } catch (e) {
-    Log(tag, 'Unable to start the TV UI: ' + e)
+    Log(tag, `Unable to start the TV UI: ${e.message}`, undefined, { error: e, web_ui_port: process.env.WEB_UI_PORT })
   }
 
   // Run migration in background (don't block the UI)

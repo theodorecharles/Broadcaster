@@ -42,7 +42,7 @@ function Channel(definition) {
     try {
       files = findFiles(dirPath)
     } catch (e) {
-      Log(tag, `Unable to scan path ${dirPath}: ${e}`, this)
+      Log(tag, `Unable to scan path ${dirPath}: ${e.message}`, this, { error: e, scan_path: dirPath, channel_slug: definition.slug })
       return
     }
 

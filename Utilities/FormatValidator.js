@@ -14,7 +14,7 @@ module.exports = {
           }
         })
       } catch(e) {
-        Log(tag, `Unable to validate file format for ${file}: ${e}`)
+        Log(tag, `Unable to validate file format for ${file}: ${e.message}`, undefined, { error: e, file })
       }
       return valid
     }

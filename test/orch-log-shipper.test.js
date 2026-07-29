@@ -135,6 +135,120 @@ test('Log() ships through the singleton with the tag as source and the channel n
     }
 })
 
+test('Log() context ships the error, the stack, and a correlation id at error level', async () => {
+    const receiver = await startMockReceiver()
+    const previousUrl = process.env.ORCH_LOG_INGEST_URL
+    const previousSecret = process.env.ORCH_LOG_INGEST_SECRET
+    const logPath = require.resolve('../Utilities/Log.js')
+    const correlationId = `req-${crypto.randomUUID()}`
+
+    process.env.ORCH_LOG_INGEST_URL = receiver.url
+    process.env.ORCH_LOG_INGEST_SECRET = SECRET
+    resetShipperForTests()
+    delete require.cache[logPath]
+
+    try {
+        const Log = require(logPath)
+        const { flushOrchLogs } = require('../Utilities/OrchLogShipper.js')
+        const { INSTANCE_ID } = require('../Utilities/LogContext.js')
+        const failure = new Error('connect ECONNREFUSED')
+        failure.code = 'ECONNREFUSED'
+
+        // Deliberately neutral wording: the level must come from the attached error, not the text.
+        await Log('LiveCheck', 'device check finished', { name: 'Example Channel' }, {
+            error: failure,
+            request_id: correlationId,
+            device_id: 'live-3576-a1'
+        })
+        const result = await flushOrchLogs()
+
+        assert.equal(result.sent, 1)
+        const record = receiver.received[0].records[0]
+        assert.equal(record.source, 'LiveCheck')
+        assert.equal(record.channel, 'Example Channel')
+        assert.equal(record.level, 'error', 'an attached error makes the record an error')
+        assert.equal(record.error, 'Error: connect ECONNREFUSED')
+        assert.equal(record.error_code, 'ECONNREFUSED')
+        assert.match(record.error_stack, /at /, 'the call site must be recoverable from the record')
+        assert.equal(record.correlation_id, correlationId)
+        assert.equal(record.device_id, 'live-3576-a1')
+        assert.equal(record.instance, INSTANCE_ID)
+        assert.equal(record.queuedAt, undefined)
+    } finally {
+        resetShipperForTests()
+        delete require.cache[logPath]
+        if (previousUrl === undefined) delete process.env.ORCH_LOG_INGEST_URL
+        else process.env.ORCH_LOG_INGEST_URL = previousUrl
+        if (previousSecret === undefined) delete process.env.ORCH_LOG_INGEST_SECRET
+        else process.env.ORCH_LOG_INGEST_SECRET = previousSecret
+        await receiver.close()
+    }
+})
+
+test('an Error in the channel slot is treated as context, not as a channel', async () => {
+    const receiver = await startMockReceiver()
+    const previousUrl = process.env.ORCH_LOG_INGEST_URL
+    const previousSecret = process.env.ORCH_LOG_INGEST_SECRET
+    const logPath = require.resolve('../Utilities/Log.js')
+
+    process.env.ORCH_LOG_INGEST_URL = receiver.url
+    process.env.ORCH_LOG_INGEST_SECRET = SECRET
+    resetShipperForTests()
+    delete require.cache[logPath]
+
+    try {
+        const Log = require(logPath)
+        const { flushOrchLogs } = require('../Utilities/OrchLogShipper.js')
+
+        await Log('Startup', 'shorthand', new Error('bare error'))
+        await flushOrchLogs()
+
+        const record = receiver.received[0].records[0]
+        assert.equal(record.channel, undefined)
+        assert.equal(record.error, 'Error: bare error')
+        assert.match(record.error_stack, /at /)
+    } finally {
+        resetShipperForTests()
+        delete require.cache[logPath]
+        if (previousUrl === undefined) delete process.env.ORCH_LOG_INGEST_URL
+        else process.env.ORCH_LOG_INGEST_URL = previousUrl
+        if (previousSecret === undefined) delete process.env.ORCH_LOG_INGEST_SECRET
+        else process.env.ORCH_LOG_INGEST_SECRET = previousSecret
+        await receiver.close()
+    }
+})
+
+test('context fields cannot overwrite the record envelope', async () => {
+    const receiver = await startMockReceiver()
+    const shipper = new OrchLogShipper({ endpointUrl: receiver.url, secret: SECRET, instanceId: 'test-instance' })
+
+    try {
+        shipper.enqueue({
+            level: 'info',
+            msg: 'real message',
+            source: 'Envelope',
+            fields: { ts: 'hijacked', level: 'fatal', msg: 'hijacked', instance: 'hijacked', kept: 'yes' }
+        })
+        await shipper.flush()
+
+        const record = receiver.received[0].records[0]
+        assert.equal(record.level, 'info')
+        assert.equal(record.msg, 'real message')
+        assert.equal(record.instance, 'test-instance')
+        assert.equal(new Date(record.ts).toISOString(), record.ts)
+        assert.equal(record.kept, 'yes')
+    } finally {
+        await receiver.close()
+    }
+})
+
+test('classifyLevel escalates a neutral message that carries an error', () => {
+    assert.equal(classifyLevel('device check finished'), 'info')
+    assert.equal(classifyLevel('device check finished', { error: 'Error: boom' }), 'error')
+    assert.equal(classifyLevel('device check finished', { error_stack: 'Error: boom\n    at x' }), 'error')
+    assert.equal(classifyLevel('retrying in 5s', {}), 'warn')
+})
+
 test('batches at 100 records per request', async () => {
     const receiver = await startMockReceiver()
     const shipper = new OrchLogShipper({ endpointUrl: receiver.url, secret: SECRET })

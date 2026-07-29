@@ -156,7 +156,7 @@ function FFMpegSession(channel) {
             channel.currentPlaylistIndex++
             Log(tag, `FFMpeg finished encoding ${file} in ${(Date.now() - start)/1000} seconds.`, channel)
         } else {
-            Log(tag, `FFMpeg produced an error (exit code ${code}), so we're skipping to next file.`, channel)
+            Log(tag, `FFMpeg produced an error (exit code ${code}), so we're skipping to next file.`, channel, { exit_code: code, file, ffmpeg_stderr_tail: stderrData.slice(-500) })
             Log(tag, `Error output: ${stderrData}`, channel)
             channel.currentPlaylistIndex++
             if (channel.segmenter) {
@@ -166,7 +166,7 @@ function FFMpegSession(channel) {
     })
 
     ffmpeg.on('error', (err) => {
-        Log(tag, `Failed to start FFMpeg: ${err.message}`, channel)
+        Log(tag, `Failed to start FFMpeg: ${err.message}`, channel, { error: err, file, channel_slug: channel && channel.slug })
         channel.currentPlaylistIndex++
         if (channel.segmenter) {
             channel.segmenter.advance()

@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const { INSTANCE_ID, RESERVED_FIELDS } = require('./LogContext.js')
 
 // Batching / delivery limits. Receiver caps a batch at 1000 records and 2 MB.
 const MAX_BATCH_RECORDS = 100
@@ -14,10 +15,12 @@ const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal']
 const ERROR_PATTERN = /\b(error|errors|failed|failing|failure|unable|exception|crash|crashed|fatal|denied|refused)\b/i
 const WARN_PATTERN = /\b(warn|warning|warnings|retry|retrying|skipping|skipped|deprecated|timeout|timed out)\b/i
 
-// Log lines carry no level of their own, so infer one from the message text.
-function classifyLevel(message) {
+// Log lines carry no level of their own, so infer one from the message text. A line that carries an
+// error object in its context is about a failure regardless of how the message is worded.
+function classifyLevel(message, fields) {
     const text = typeof message === 'string' ? message : String(message ?? '')
     if (ERROR_PATTERN.test(text)) return 'error'
+    if (fields && (fields.error !== undefined || fields.error_stack !== undefined)) return 'error'
     if (WARN_PATTERN.test(text)) return 'warn'
     return 'info'
 }
@@ -56,6 +59,7 @@ class OrchLogShipper {
         this.maxQueuedRecords = options.maxQueuedRecords || MAX_QUEUED_RECORDS
         this.maxRecordAgeMs = options.maxRecordAgeMs || MAX_RECORD_AGE_MS
         this.retryBackoffMs = options.retryBackoffMs || RETRY_BACKOFF_MS
+        this.instanceId = options.instanceId || INSTANCE_ID
 
         this.queue = []
         this.timer = null
@@ -74,16 +78,24 @@ class OrchLogShipper {
     enqueue(record) {
         if (!this.enabled || this.closed) return false
         try {
-            const level = LEVELS.includes(record.level) ? record.level : classifyLevel(record.msg)
+            const fields = record.fields && typeof record.fields === 'object' ? record.fields : null
+            const level = LEVELS.includes(record.level) ? record.level : classifyLevel(record.msg, fields)
             const entry = {
                 ts: record.ts || new Date(this.now()).toISOString(),
                 level,
                 msg: typeof record.msg === 'string' ? record.msg : String(record.msg ?? ''),
+                instance: this.instanceId,
                 queuedAt: this.now()
             }
             if (record.source) entry.source = String(record.source)
             if (record.channel) entry.channel = String(record.channel)
-            if (record.fields && typeof record.fields === 'object') Object.assign(entry, record.fields)
+            // Context fields never overwrite the record envelope.
+            if (fields) {
+                for (const [key, value] of Object.entries(fields)) {
+                    if (value === undefined || RESERVED_FIELDS.has(key)) continue
+                    entry[key] = value
+                }
+            }
 
             this.queue.push(entry)
             while (this.queue.length > this.maxQueuedRecords) {
@@ -248,14 +260,20 @@ function getShipper() {
     return singleton
 }
 
-function shipLogRecord(tag, message, channel) {
+// `context` is either the normalized shape from LogContext.normalizeContext() ({ fields }) or a plain
+// object of fields; both are accepted so callers outside Log() can ship structured detail too.
+function shipLogRecord(tag, message, channel, context) {
     try {
         const shipper = getShipper()
         if (!shipper.enabled) return false
+        const fields = context && typeof context === 'object'
+            ? (context.fields && typeof context.fields === 'object' ? context.fields : context)
+            : null
         return shipper.enqueue({
             msg: message,
             source: tag,
-            channel: channel && channel.name ? channel.name : undefined
+            channel: channel && channel.name ? channel.name : undefined,
+            fields
         })
     } catch (e) {
         return false

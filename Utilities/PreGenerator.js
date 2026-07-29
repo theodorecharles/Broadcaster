@@ -209,7 +209,7 @@ class PreGenerator {
             fs.rmdirSync(outputDir)
             Log(tag, `Deleted incomplete generation for ${fileName}`)
         } catch (e) {
-            Log(tag, `Failed to delete incomplete generation: ${e.message}`)
+            Log(tag, `Failed to delete incomplete generation: ${e.message}`, undefined, { error: e, output_dir: outputDir, file_name: fileName })
         }
     }
 
@@ -227,7 +227,7 @@ class PreGenerator {
                 WHERE id = ?
             `).run(video.id)
         } catch (e) {
-            Log(tag, `Failed to update database: ${e.message}`)
+            Log(tag, `Failed to update database: ${e.message}`, undefined, { error: e, video_id: video && video.id, file_name: fileName, reason })
         }
 
         if (fs.existsSync(outputDir)) {
@@ -356,7 +356,7 @@ class PreGenerator {
                 manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
             }
         } catch (err) {
-            Log(tag, `Error loading manifest: ${err.message}`, channel)
+            Log(tag, `Error loading manifest: ${err.message}`, channel, { error: err, manifest_path: manifestPath })
         }
 
         // Build set of current video hashes from database
@@ -658,7 +658,7 @@ class PreGenerator {
                             }
                         })
                     } catch (e) {
-                        Log(tag, `Could not calculate video duration: ${e.message}`, channel)
+                        Log(tag, `Could not calculate video duration: ${e.message}`, channel, { error: e, playlist_path: outputPath, video_hash: videoHash })
                     }
 
                     // Store metadata
@@ -687,7 +687,7 @@ class PreGenerator {
                             parseInt(videoInfo.height) || null
                         )
                     } catch (dbErr) {
-                        Log(tag, `Database update error: ${dbErr.message}`, channel)
+                        Log(tag, `Database update error: ${dbErr.message}`, channel, { error: dbErr, video_id: videoId, video_hash: videoHash })
                     }
 
                     // Invalidate playlist cache so newly transcoded video appears
@@ -697,14 +697,14 @@ class PreGenerator {
 
                     resolve()
                 } else {
-                    Log(tag, `Failed to generate ${path.basename(filePath)} (exit code ${code})`, channel)
+                    Log(tag, `Failed to generate ${path.basename(filePath)} (exit code ${code})`, channel, { exit_code: code, file_path: filePath, video_hash: videoHash, ffmpeg_stderr_tail: stderrData.slice(-500) })
                     Log(tag, `Error: ${stderrData.slice(-500)}`, channel)
                     reject(new Error(`FFmpeg exited with code ${code}`))
                 }
             })
 
             ffmpeg.on('error', (err) => {
-                Log(tag, `FFmpeg error for ${path.basename(filePath)}: ${err.message}`, channel)
+                Log(tag, `FFmpeg error for ${path.basename(filePath)}: ${err.message}`, channel, { error: err, file_path: filePath, video_hash: videoHash })
                 reject(err)
             })
         })
