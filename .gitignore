@@ -3,3 +3,6 @@ node_modules/
 .vscode
 .DS_Store
 logs/
+.env
+.env.local
+local.env
