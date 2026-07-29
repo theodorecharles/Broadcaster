@@ -6,10 +6,10 @@ module.exports = {
     isSupported: file => {
       var valid = false
       try {
-        const ext = file.split('.').pop()
+        const ext = file.split('.').pop().toLowerCase()
         process.env.SUPPORTED_FORMATS.split(',')
           .forEach(format => {
-          if (ext == format) {
+          if (ext == format.trim().toLowerCase()) {
             valid = true
           }
         })

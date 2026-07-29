@@ -38,7 +38,13 @@ function Channel(definition) {
 
   definition.paths.forEach(dirPath => {
     let count = 0
-    const files = findFiles(dirPath)
+    let files
+    try {
+      files = findFiles(dirPath)
+    } catch (e) {
+      Log(tag, `Unable to scan path ${dirPath}: ${e}`, this)
+      return
+    }
 
     files.forEach(file => {
       if (Format.isSupported(file)) {

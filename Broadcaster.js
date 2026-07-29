@@ -18,13 +18,21 @@ let uiStarted = false
 
 const cleanup = () => {
   Log(tag, 'Cleaning up ...')
+  try {
+    PreGenerator.stopActiveWorkers()
+  } catch (e) {
+    Log(tag, `Error stopping ffmpeg workers: ${e}`)
+  }
   Log(tag, 'Bye now.')
 }
 
-process.on('SIGINT', _ => {
+const shutdown = () => {
   cleanup()
   process.exit(0)
-})
+}
+
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)
 
 // Load and parse channels.json
 function loadChannels() {
@@ -105,5 +113,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  initializeChannels
+  initializeChannels,
+  cleanup
 }

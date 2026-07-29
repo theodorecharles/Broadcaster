@@ -257,6 +257,8 @@ function App() {
 
         addEndedListener(video, handleEnded)
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Live/channel playlists must not inherit loop from prior static playback
+        video.loop = false
         video.src = playlistUrl
         video.play().catch(err => console.log('Autoplay blocked:', err))
         setShowStatic(false)

@@ -230,10 +230,11 @@ test('keeps the parent-folder fallback outside configured roots', () => {
 test('channel type controls ordering across library repeats', (t) => {
   t.mock.method(Math, 'random', () => 0)
 
+  // Reverse of path order — simulates DB insert order from unsorted readdir
   videos = [
+    { file_path: '/media/Episode 03.mkv', duration_seconds: 4 * 60 * 60 },
     { file_path: '/media/Episode 01.mkv', duration_seconds: 4 * 60 * 60 },
-    { file_path: '/media/Episode 02.mkv', duration_seconds: 4 * 60 * 60 },
-    { file_path: '/media/Episode 03.mkv', duration_seconds: 4 * 60 * 60 }
+    { file_path: '/media/Episode 02.mkv', duration_seconds: 4 * 60 * 60 }
   ]
 
   const dayStart = local3am(2026, 6, 28)
@@ -259,6 +260,13 @@ test('channel type controls ordering across library repeats', (t) => {
       '/media/Episode 03.mkv'
     ]
   )
+
+  // Fixed order for deterministic Fisher-Yates with Math.random === 0
+  videos = [
+    { file_path: '/media/Episode 01.mkv', duration_seconds: 4 * 60 * 60 },
+    { file_path: '/media/Episode 02.mkv', duration_seconds: 4 * 60 * 60 },
+    { file_path: '/media/Episode 03.mkv', duration_seconds: 4 * 60 * 60 }
+  ]
 
   const shuffleGenerator = new GuideGenerator({
     type: 'shuffle',

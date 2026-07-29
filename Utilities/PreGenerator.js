@@ -20,6 +20,18 @@ const { CACHE_DIR,
 let hasNvidiaGPU = false
 let gpuCheckDone = false
 
+/**
+ * VIDEO_FILTER of yadif or yadif_cuda both request deinterlace.
+ * CUDA vs CPU filter is chosen from the active encode path, not the env string alone.
+ * @param {string|undefined} videoFilter
+ * @param {boolean} useCuda
+ * @returns {string} filter prefix ending in comma, or empty string
+ */
+function deinterlacePrefix(videoFilter, useCuda) {
+    if (videoFilter !== 'yadif' && videoFilter !== 'yadif_cuda') return ''
+    return useCuda ? 'yadif_cuda,' : 'yadif,'
+}
+
 function checkNvidiaGPU() {
     if (gpuCheckDone) return hasNvidiaGPU
 
@@ -50,6 +62,84 @@ function checkNvidiaGPU() {
     return hasNvidiaGPU
 }
 
+/**
+ * Resolve ffmpeg video encode settings from GPU state and config.
+ * Passes VIDEO_CODEC through except when NVENC is requested without a usable GPU path.
+ * Exported for unit tests.
+ *
+ * @param {object} opts
+ * @param {boolean} opts.hasGPU
+ * @param {boolean} opts.canUseGPU - full CUDA decode+filter+NVENC path is safe for this file
+ * @param {boolean} opts.is10Bit
+ * @param {string|number} opts.width - target scale width
+ * @param {string} opts.filePath - for hybrid-path log message only
+ * @param {object} [opts.channel]
+ * @param {string} [opts.videoCodecConfig] - defaults to process.env.VIDEO_CODEC
+ * @param {string} [opts.videoPreset] - defaults to process.env.VIDEO_PRESET
+ * @param {string} [opts.videoCrf] - defaults to process.env.VIDEO_CRF
+ * @param {string} [opts.videoFilter] - defaults to process.env.VIDEO_FILTER
+ */
+function resolveEncodeSettings({
+    hasGPU,
+    canUseGPU,
+    is10Bit,
+    width,
+    filePath,
+    channel,
+    videoCodecConfig = VIDEO_CODEC,
+    videoPreset = VIDEO_PRESET,
+    videoCrf = VIDEO_CRF,
+    videoFilter = VIDEO_FILTER
+}) {
+    const crf = videoCrf || '23'
+    const deinterlaceCpu = deinterlacePrefix(videoFilter, false)
+
+    if (canUseGPU) {
+        // Full GPU path: NVDEC decode + CUDA filters + NVENC encode
+        const deinterlace = deinterlacePrefix(videoFilter, true)
+        return {
+            inputArgs: ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-i', filePath],
+            videoCodec: 'h264_nvenc',
+            videoPreset: videoPreset || 'p4',
+            qualityArgs: ['-cq', crf, '-rc', 'vbr', '-b:v', '0'],
+            fullVideoFilter: `${deinterlace}scale_cuda=${width}:-2,hwdownload,format=nv12`
+        }
+    }
+
+    if (hasGPU && videoCodecConfig === 'h264_nvenc') {
+        // Hybrid path: CPU decode + CPU filters + NVENC encode (for incompatible files)
+        Log(tag, `Using CPU decode for ${path.basename(filePath)} (${is10Bit ? '10-bit' : 'incompatible codec'})`, channel)
+        return {
+            inputArgs: ['-i', filePath],
+            videoCodec: 'h264_nvenc',
+            videoPreset: videoPreset || 'p4',
+            qualityArgs: ['-cq', crf, '-rc', 'vbr', '-b:v', '0'],
+            fullVideoFilter: `${deinterlaceCpu}scale=${width}:-2`
+        }
+    }
+
+    // Configured codec path. Only fall back to software when NVENC was requested without a GPU.
+    let videoCodec = videoCodecConfig || 'libx264'
+    let resolvedPreset = videoPreset
+
+    if (videoCodec === 'h264_nvenc') {
+        videoCodec = 'libx264'
+        resolvedPreset = videoPreset || 'veryfast'
+        Log(tag, 'GPU requested but not available - falling back to software encoding', channel)
+    } else if (!resolvedPreset) {
+        // Sensible defaults when VIDEO_PRESET is unset
+        resolvedPreset = videoCodec === 'libx264' ? 'veryfast' : 'medium'
+    }
+
+    return {
+        inputArgs: ['-i', filePath],
+        videoCodec,
+        videoPreset: resolvedPreset,
+        qualityArgs: ['-crf', crf],
+        fullVideoFilter: `${deinterlaceCpu}scale=${width}:-2`
+    }
+}
+
 class PreGenerator {
 
     constructor() {
@@ -58,6 +148,45 @@ class PreGenerator {
         this.currentIndex = 0
         this.totalVideos = 0
         this.isGenerating = false
+        /** @type {Set<import('child_process').ChildProcess>} */
+        this.activeProcesses = new Set()
+        this.shuttingDown = false
+    }
+
+    /**
+     * Kill in-flight ffmpeg workers (SIGTERM then SIGKILL) and stop the queue.
+     * Called from process shutdown hooks so Ctrl-C / pm2 stop do not orphan encoders.
+     */
+    stopActiveWorkers() {
+        this.shuttingDown = true
+        this.generationQueue = []
+
+        const procs = [...this.activeProcesses]
+        for (const proc of procs) {
+            try {
+                if (proc.exitCode === null && proc.signalCode === null) {
+                    proc.kill('SIGTERM')
+                }
+            } catch (_) {
+                // Process may already be gone
+            }
+        }
+        for (const proc of procs) {
+            try {
+                if (proc.exitCode === null && proc.signalCode === null) {
+                    proc.kill('SIGKILL')
+                }
+            } catch (_) {
+                // Process may already be gone
+            }
+        }
+
+        this.activeProcesses.clear()
+        this.isGenerating = false
+
+        if (procs.length > 0) {
+            Log(tag, `Stopped ${procs.length} in-flight ffmpeg worker(s)`)
+        }
     }
 
     /**
@@ -440,36 +569,20 @@ class PreGenerator {
                               !is10Bit &&
                               gpuCompatibleCodecs.includes(videoInfo.codec)
 
-            // Determine codec, filter, and settings
-            let videoCodec, videoPreset, inputArgs, qualityArgs, fullVideoFilter
-
-            if (canUseGPU) {
-                // Full GPU path: NVDEC decode + CUDA filters + NVENC encode
-                inputArgs = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-i', filePath]
-                videoCodec = 'h264_nvenc'
-                videoPreset = VIDEO_PRESET || 'p4'
-                qualityArgs = ['-cq', VIDEO_CRF || '23', '-rc', 'vbr', '-b:v', '0']
-                // Scale to width, maintain aspect ratio (height = -2 ensures divisible by 2)
-                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif_cuda,' : ''
-                fullVideoFilter = `${deinterlace}scale_cuda=${width}:-2,hwdownload,format=nv12`
-            } else if (hasGPU && VIDEO_CODEC === 'h264_nvenc') {
-                // Hybrid path: CPU decode + CPU filters + NVENC encode (for incompatible files)
-                inputArgs = ['-i', filePath]
-                videoCodec = 'h264_nvenc'
-                videoPreset = VIDEO_PRESET || 'p4'
-                qualityArgs = ['-cq', VIDEO_CRF || '23', '-rc', 'vbr', '-b:v', '0']
-                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif,' : ''
-                fullVideoFilter = `${deinterlace}scale=${width}:-2`
-                Log(tag, `Using CPU decode for ${path.basename(filePath)} (${is10Bit ? '10-bit' : 'incompatible codec'})`, channel)
-            } else {
-                // Full CPU path
-                inputArgs = ['-i', filePath]
-                videoCodec = 'libx264'
-                videoPreset = VIDEO_PRESET || 'veryfast'
-                qualityArgs = ['-crf', VIDEO_CRF || '23']
-                const deinterlace = VIDEO_FILTER === 'yadif' ? 'yadif,' : ''
-                fullVideoFilter = `${deinterlace}scale=${width}:-2`
-            }
+            const {
+                videoCodec,
+                videoPreset,
+                inputArgs,
+                qualityArgs,
+                fullVideoFilter
+            } = resolveEncodeSettings({
+                hasGPU,
+                canUseGPU,
+                is10Bit,
+                width,
+                filePath,
+                channel
+            })
 
             // Determine audio handling - copy if already AAC, otherwise re-encode
             const canCopyAudio = videoInfo.audioCodec === 'aac'
@@ -495,6 +608,11 @@ class PreGenerator {
             ]
 
             const ffmpeg = spawn('ffmpeg', args)
+            this.activeProcesses.add(ffmpeg)
+            const untrack = () => this.activeProcesses.delete(ffmpeg)
+            ffmpeg.once('close', untrack)
+            ffmpeg.once('error', untrack)
+
             const startTime = Date.now()
             let stderrData = ''
 
@@ -503,6 +621,10 @@ class PreGenerator {
             })
 
             ffmpeg.on('close', (code) => {
+                if (this.shuttingDown) {
+                    reject(new Error('FFmpeg stopped during shutdown'))
+                    return
+                }
                 if (code === 0) {
                     const duration = (Date.now() - startTime) / 1000
                     Log(tag, `Generated ${path.basename(filePath)} in ${duration.toFixed(1)}s [${this.currentIndex}/${this.totalVideos}]`, channel)
@@ -618,16 +740,26 @@ class PreGenerator {
         Log(tag, `Starting generation of ${this.totalVideos} videos (round-robin across channels)...`)
 
         for (const item of this.generationQueue) {
+            if (this.shuttingDown) {
+                break
+            }
             this.currentIndex++
             try {
                 await this.generateVideo(item.videoId, item.filePath, item.channel)
             } catch (err) {
+                if (this.shuttingDown) {
+                    break
+                }
                 Log(tag, `Skipping failed video: ${item.filePath}`)
             }
         }
 
         this.isGenerating = false
-        Log(tag, `Generation complete! Processed ${this.totalVideos} videos.`)
+        if (this.shuttingDown) {
+            Log(tag, 'Generation stopped during shutdown')
+        } else {
+            Log(tag, `Generation complete! Processed ${this.totalVideos} videos.`)
+        }
     }
 
     /**
@@ -645,4 +777,8 @@ class PreGenerator {
     }
 }
 
-module.exports = new PreGenerator()
+const preGenerator = new PreGenerator()
+module.exports = preGenerator
+module.exports.resolveEncodeSettings = resolveEncodeSettings
+module.exports.deinterlacePrefix = deinterlacePrefix
+

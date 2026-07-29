@@ -192,7 +192,13 @@ class GuideGenerator {
     const schedule = overlappingEntry ? [{ ...overlappingEntry }] : []
     let currentTime = scheduleStart
     const shouldShuffle = this.channel.type !== 'alphabetical'
-    let scheduledVideos = shouldShuffle ? shuffleArray(videos) : videos
+    // Alphabetical must follow path/filename order, not DB insert id (readdir is unsorted).
+    const libraryVideos = shouldShuffle
+      ? videos
+      : [...videos].sort((a, b) =>
+        a.file_path.localeCompare(b.file_path, undefined, { sensitivity: 'base' })
+      )
+    let scheduledVideos = shouldShuffle ? shuffleArray(libraryVideos) : libraryVideos
     let videoIndex = 0
 
     while (currentTime < dayEnd) {
@@ -202,7 +208,7 @@ class GuideGenerator {
           // Library is big enough, shouldn't need repeats - but just in case
           Log(tag, `Restarting video sequence (unexpected - library should cover guide interval)`, this.channel)
         }
-        scheduledVideos = shouldShuffle ? shuffleArray(videos) : videos
+        scheduledVideos = shouldShuffle ? shuffleArray(libraryVideos) : libraryVideos
         videoIndex = 0
       }
 
