@@ -20,6 +20,18 @@ const { CACHE_DIR,
 let hasNvidiaGPU = false
 let gpuCheckDone = false
 
+/**
+ * VIDEO_FILTER of yadif or yadif_cuda both request deinterlace.
+ * CUDA vs CPU filter is chosen from the active encode path, not the env string alone.
+ * @param {string|undefined} videoFilter
+ * @param {boolean} useCuda
+ * @returns {string} filter prefix ending in comma, or empty string
+ */
+function deinterlacePrefix(videoFilter, useCuda) {
+    if (videoFilter !== 'yadif' && videoFilter !== 'yadif_cuda') return ''
+    return useCuda ? 'yadif_cuda,' : 'yadif,'
+}
+
 function checkNvidiaGPU() {
     if (gpuCheckDone) return hasNvidiaGPU
 
@@ -80,11 +92,11 @@ function resolveEncodeSettings({
     videoFilter = VIDEO_FILTER
 }) {
     const crf = videoCrf || '23'
-    const deinterlaceCpu = videoFilter === 'yadif' ? 'yadif,' : ''
+    const deinterlaceCpu = deinterlacePrefix(videoFilter, false)
 
     if (canUseGPU) {
         // Full GPU path: NVDEC decode + CUDA filters + NVENC encode
-        const deinterlace = videoFilter === 'yadif' ? 'yadif_cuda,' : ''
+        const deinterlace = deinterlacePrefix(videoFilter, true)
         return {
             inputArgs: ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-i', filePath],
             videoCodec: 'h264_nvenc',
@@ -768,3 +780,5 @@ class PreGenerator {
 const preGenerator = new PreGenerator()
 module.exports = preGenerator
 module.exports.resolveEncodeSettings = resolveEncodeSettings
+module.exports.deinterlacePrefix = deinterlacePrefix
+
