@@ -58,6 +58,23 @@ function scheduleDaily3amRegeneration() {
     }, msUntil3am)
 }
 
+// Client-facing payloads must never include absolute host filesystem paths.
+function buildDebugVideoPayload(videoInfo) {
+    if (!videoInfo) return null
+    return {
+        transcoded: videoInfo.transcoded === 1,
+        duration: videoInfo.duration_seconds,
+        segmentCount: videoInfo.segment_count
+    }
+}
+
+function buildManifestEntryPayload(info) {
+    return {
+        filename: info.filename,
+        addedAt: info.addedAt ? new Date(info.addedAt).toISOString() : null
+    }
+}
+
 // Build combined guide from all channels for API response
 function buildCombinedGuide() {
     const guide = {
@@ -223,12 +240,7 @@ class TelevisionUI {
                 offsetInVideo: Math.round((now - currentEntry.startTime) / 1000),
                 duration: currentEntry.duration
             } : null,
-            videoInDatabase: videoInfo ? {
-                filePath: videoInfo.file_path,
-                transcoded: videoInfo.transcoded === 1,
-                duration: videoInfo.duration_seconds,
-                segmentCount: videoInfo.segment_count
-            } : null
+            videoInDatabase: buildDebugVideoPayload(videoInfo)
         })
     })
 
@@ -283,11 +295,7 @@ class TelevisionUI {
             const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
             const result = {}
             for (const [hash, info] of Object.entries(manifest)) {
-                result[hash] = {
-                    filename: info.filename,
-                    originalPath: info.originalPath,
-                    addedAt: info.addedAt ? new Date(info.addedAt).toISOString() : null
-                }
+                result[hash] = buildManifestEntryPayload(info)
             }
             res.json(result)
         } catch (e) {
@@ -348,3 +356,5 @@ module.exports = () => {
 
 // Export for external use
 module.exports.regenerateAllGuides = regenerateAllGuides
+module.exports.buildDebugVideoPayload = buildDebugVideoPayload
+module.exports.buildManifestEntryPayload = buildManifestEntryPayload
