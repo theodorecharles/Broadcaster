@@ -43,6 +43,7 @@ COPY config.docker.txt ./config.txt
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /app/Webapp/dist ./Webapp/dist
 COPY Webapp/TelevisionUI.js ./Webapp/
+COPY Webapp/staticAssets.js ./Webapp/
 COPY Webapp/static ./Webapp/static
 COPY Webapp/static-4x3 ./Webapp/static-4x3
 COPY Webapp/static.gif ./Webapp/
