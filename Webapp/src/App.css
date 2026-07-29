@@ -131,6 +131,11 @@ video::-webkit-media-controls-picture-in-picture-button {
   font-size: 48px;
 }
 
+.channel-overlay.invalid {
+  color: #f44;
+  text-shadow: 0 0 10px #f44;
+}
+
 .channel-name {
   position: absolute;
   bottom: 20px;

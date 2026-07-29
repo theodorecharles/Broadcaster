@@ -2,6 +2,14 @@ import { useState, useEffect, useRef } from 'react'
 import Hls from 'hls.js'
 import './App.css'
 import { cancelChannelSwitch, scheduleChannelSwitch } from './channelSwitch.mjs'
+import {
+  CHANNEL_ENTRY_INVALID_MS,
+  appendDigit,
+  cancelChannelEntry,
+  parseChannelNumber,
+  resolveChannelIndex,
+  scheduleChannelEntryCommit
+} from './channelEntry.mjs'
 import { showOverlay } from './overlayTimer.mjs'
 import {
   removeEndedListener as removeEndedListenerFromRef,
@@ -42,6 +50,10 @@ function App() {
   const hlsRef = useRef(null)
   const channelSwitchTimeoutRef = useRef(null)
   const channelOverlayTimeoutRef = useRef(null)
+  const channelEntryTimeoutRef = useRef(null)
+  const channelEntryInvalidTimeoutRef = useRef(null)
+  const channelEntryBufferRef = useRef('')
+  const channelEntryInvalidRef = useRef(false)
   const volumeOverlayTimeoutRef = useRef(null)
   const endedListenerRef = useRef(null)
   const playbackTimeoutRef = useRef(null)
@@ -53,6 +65,8 @@ function App() {
   const [currentVolume, setCurrentVolume] = useState(1.0)
   const [showStatic, setShowStatic] = useState(false)
   const [showChannelOverlay, setShowChannelOverlay] = useState(false)
+  const [channelEntryBuffer, setChannelEntryBuffer] = useState('')
+  const [channelEntryInvalid, setChannelEntryInvalid] = useState(false)
   const [showVolumeOverlay, setShowVolumeOverlay] = useState(false)
   const [powerAnimation, setPowerAnimation] = useState(null)
   const [showGuide, setShowGuide] = useState(false)
@@ -92,9 +106,20 @@ function App() {
     }
   }
 
+  const clearChannelEntry = () => {
+    cancelChannelEntry(channelEntryTimeoutRef)
+    cancelChannelEntry(channelEntryInvalidTimeoutRef)
+    channelEntryBufferRef.current = ''
+    channelEntryInvalidRef.current = false
+    setChannelEntryBuffer('')
+    setChannelEntryInvalid(false)
+  }
+
   useEffect(() => {
     return () => {
       cancelChannelSwitch(channelSwitchTimeoutRef)
+      cancelChannelEntry(channelEntryTimeoutRef)
+      cancelChannelEntry(channelEntryInvalidTimeoutRef)
       clearPlaybackTimeout()
       stopPlaybackSession()
     }
@@ -271,14 +296,70 @@ function App() {
   // Channel navigation
   const channelUp = () => {
     if (!isPoweredOn || channels.length === 0) return
+    clearChannelEntry()
     const nextIndex = (currentChannelIndex + 1) % channels.length
     changeChannel(nextIndex)
   }
 
   const channelDown = () => {
     if (!isPoweredOn || channels.length === 0) return
+    clearChannelEntry()
     const prevIndex = currentChannelIndex <= 0 ? channels.length - 1 : currentChannelIndex - 1
     changeChannel(prevIndex)
+  }
+
+  const flashInvalidChannelEntry = (displayBuffer) => {
+    channelEntryBufferRef.current = displayBuffer
+    channelEntryInvalidRef.current = true
+    setChannelEntryBuffer(displayBuffer)
+    setChannelEntryInvalid(true)
+    showOverlay(setShowChannelOverlay, channelOverlayTimeoutRef, CHANNEL_ENTRY_INVALID_MS)
+    cancelChannelEntry(channelEntryInvalidTimeoutRef)
+    scheduleChannelEntryCommit(
+      channelEntryInvalidTimeoutRef,
+      () => {
+        channelEntryBufferRef.current = ''
+        channelEntryInvalidRef.current = false
+        setChannelEntryBuffer('')
+        setChannelEntryInvalid(false)
+      },
+      CHANNEL_ENTRY_INVALID_MS
+    )
+  }
+
+  const commitChannelEntry = (buffer, channelList) => {
+    cancelChannelEntry(channelEntryTimeoutRef)
+    const channelNumber = parseChannelNumber(buffer)
+    const index = resolveChannelIndex(channelNumber, channelList.length)
+    channelEntryBufferRef.current = ''
+    channelEntryInvalidRef.current = false
+    setChannelEntryBuffer('')
+    setChannelEntryInvalid(false)
+    if (index === null) {
+      flashInvalidChannelEntry(buffer)
+      return
+    }
+    changeChannel(index)
+  }
+
+  const handleDigitEntry = (digit) => {
+    if (!isPoweredOn || channels.length === 0) return
+    if (!/^[0-9]$/.test(digit)) return
+
+    cancelChannelEntry(channelEntryInvalidTimeoutRef)
+    const base = channelEntryInvalidRef.current ? '' : channelEntryBufferRef.current
+    channelEntryInvalidRef.current = false
+    setChannelEntryInvalid(false)
+
+    const next = appendDigit(base, digit)
+    if (next.length === 0) return
+
+    channelEntryBufferRef.current = next
+    setChannelEntryBuffer(next)
+    showOverlay(setShowChannelOverlay, channelOverlayTimeoutRef)
+    scheduleChannelEntryCommit(channelEntryTimeoutRef, () => {
+      commitChannelEntry(channelEntryBufferRef.current, channels)
+    })
   }
 
   // Volume control
@@ -361,6 +442,7 @@ function App() {
       setIsPoweredOn(false)
       setPowerAnimation('power-off')
 
+      clearChannelEntry()
       cancelChannelSwitch(channelSwitchTimeoutRef)
       clearPlaybackTimeout()
       removeEndedListener()
@@ -552,6 +634,12 @@ function App() {
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault()
+        handleDigitEntry(e.key)
+        return
+      }
+
       switch (e.key) {
         case 'ArrowUp':
           e.preventDefault()
@@ -592,6 +680,12 @@ function App() {
   }, [isPoweredOn, channels, currentChannelIndex, currentVolume, showGuide])
 
   const currentChannel = channels[currentChannelIndex]
+  const overlayChannelLabel = channelEntryBuffer
+    ? channelEntryBuffer
+    : String(currentChannelIndex + 1)
+  const overlayChannelName = channelEntryBuffer
+    ? (channelEntryInvalid ? 'INVALID' : '')
+    : (currentChannel?.name.toUpperCase() || 'LOADING...')
 
   return (
     <div className="tv-container">
@@ -615,12 +709,14 @@ function App() {
             style={{ display: showStatic ? 'block' : 'none' }}
           />
 
-          <div className={`channel-overlay ${showChannelOverlay ? 'show' : ''}`}>
-            CH {currentChannelIndex + 1}
+          <div
+            className={`channel-overlay ${showChannelOverlay ? 'show' : ''} ${channelEntryInvalid ? 'invalid' : ''}`}
+          >
+            CH {overlayChannelLabel}
           </div>
 
-          <div className={`channel-name ${showChannelOverlay ? 'show' : ''}`}>
-            {currentChannel?.name.toUpperCase() || 'LOADING...'}
+          <div className={`channel-name ${showChannelOverlay && overlayChannelName ? 'show' : ''}`}>
+            {overlayChannelName}
           </div>
 
           <div className={`volume-overlay ${showVolumeOverlay ? 'show' : ''}`}>
