@@ -378,3 +378,38 @@ test('stopActiveWorkers skips kill when process already exited', () => {
     assert.equal(killCalls, 0)
     assert.equal(preGenerator.activeProcesses.size, 0)
 })
+
+test('getVideoInfo passes media path as execFileSync argv (no shell)', t => {
+    const childProcess = require('child_process')
+    const maliciousPath = '/library/evil"; touch /tmp/pwned; echo ".mkv'
+    const calls = []
+
+    t.mock.method(childProcess, 'execFileSync', (cmd, args, opts) => {
+        calls.push({ cmd, args, opts })
+        if (Array.isArray(args) && args.includes('a:0')) {
+            return 'aac\n'
+        }
+        return 'h264,yuv420p,1920,1080,8\n'
+    })
+
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase(maliciousPath, []))
+    const info = preGenerator.getVideoInfo(maliciousPath)
+
+    assert.equal(info.codec, 'h264')
+    assert.equal(info.audioCodec, 'aac')
+    assert.equal(calls.length, 2)
+
+    for (const call of calls) {
+        assert.equal(call.cmd, 'ffprobe')
+        assert.ok(Array.isArray(call.args), 'args must be an array (no shell string)')
+        assert.equal(call.args[call.args.length - 1], maliciousPath)
+        assert.equal(call.args.includes(maliciousPath), true)
+        // Path must not be interpolated into a single shell command string
+        assert.equal(typeof call.args, 'object')
+        for (const arg of call.args) {
+            assert.equal(String(arg).includes('touch /tmp/pwned'), arg === maliciousPath)
+        }
+        assert.equal(call.opts && call.opts.shell, undefined)
+    }
+})

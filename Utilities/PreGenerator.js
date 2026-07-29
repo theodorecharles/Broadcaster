@@ -1,4 +1,4 @@
-const { spawn, execSync } = require('child_process')
+const { spawn, execSync, execFileSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
@@ -509,10 +509,19 @@ class PreGenerator {
      * Get video file info using ffprobe
      */
     getVideoInfo(filePath) {
+        // Pass filePath as an argv element (execFileSync, no shell) so media
+        // names with quotes/metacharacters cannot inject into a shell string.
         try {
             // Get video stream info
-            const videoResult = execSync(
-                `ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,pix_fmt,width,height,bit_depth -of csv=p=0 "${filePath}"`,
+            const videoResult = execFileSync(
+                'ffprobe',
+                [
+                    '-v', 'error',
+                    '-select_streams', 'v:0',
+                    '-show_entries', 'stream=codec_name,pix_fmt,width,height,bit_depth',
+                    '-of', 'csv=p=0',
+                    filePath
+                ],
                 { encoding: 'utf8', timeout: 10000 }
             )
             const videoParts = videoResult.trim().split(',')
@@ -520,8 +529,15 @@ class PreGenerator {
             // Get audio stream info
             let audioCodec = 'unknown'
             try {
-                const audioResult = execSync(
-                    `ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "${filePath}"`,
+                const audioResult = execFileSync(
+                    'ffprobe',
+                    [
+                        '-v', 'error',
+                        '-select_streams', 'a:0',
+                        '-show_entries', 'stream=codec_name',
+                        '-of', 'csv=p=0',
+                        filePath
+                    ],
                     { encoding: 'utf8', timeout: 10000 }
                 )
                 audioCodec = audioResult.trim() || 'unknown'
