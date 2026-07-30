@@ -55,11 +55,15 @@ function isUnreadableProbeResult(videoInfo) {
 function isUnreadableMediaStderr(stderr) {
     if (typeof stderr !== 'string' || stderr.length === 0) return false
     return /Invalid data found when processing input/i.test(stderr) ||
+        /Invalid data found/i.test(stderr) ||
         /EBML header parsing failed/i.test(stderr) ||
         /invalid as first byte of an EBML number/i.test(stderr) ||
         /misdetection possible/i.test(stderr) ||
         /Error opening input/i.test(stderr) ||
         /moov atom not found/i.test(stderr) ||
+        /End of file/i.test(stderr) ||
+        /does not contain any stream/i.test(stderr) ||
+        /could not find codec parameters/i.test(stderr) ||
         /Invalid argument/i.test(stderr) && /matroska|webm|mov|mp4|avi|mpeg/i.test(stderr) ||
         /No such file or directory/i.test(stderr) ||
         /Permission denied/i.test(stderr)
@@ -876,9 +880,9 @@ class PreGenerator {
                 if (this.shuttingDown) {
                     break
                 }
-                // Probe failures resolve as skipped (no throw). If UNREADABLE_MEDIA is still
-                // rejected by a future path, do not stack a second ERROR-classified line.
-                if (err && err.code === 'UNREADABLE_MEDIA') {
+                // Probe failures resolve as skipped (no throw). If a path still rejects with
+                // UNREADABLE_MEDIA / mediaSkip, do not stack a second ERROR-classified line.
+                if (err && (err.code === 'UNREADABLE_MEDIA' || err.mediaSkip || err.unreadableMedia)) {
                     continue
                 }
                 // Avoid "failed" in the message — it classifies as ERROR and files a log-monitor ticket
