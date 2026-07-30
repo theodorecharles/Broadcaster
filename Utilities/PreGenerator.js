@@ -41,6 +41,7 @@ function deinterlacePrefix(videoFilter, useCuda) {
  */
 function isUnreadableProbeResult(videoInfo) {
     if (!videoInfo || typeof videoInfo !== 'object') return true
+    if (videoInfo.probeFailed || videoInfo.unreadable) return true
     const codec = videoInfo.codec
     return codec === 'unreadable' || codec === 'error' || codec === '?' || codec === ''
 }
@@ -552,6 +553,22 @@ class PreGenerator {
     }
 
     /**
+     * Pull a short human-readable reason from an execFileSync/ffprobe failure.
+     * Prefer stderr (demuxer detail). Never fall back to Node's "Command failed: …"
+     * string — the word "failed" makes OrchLogShipper classify the skip line as ERROR.
+     */
+    describeProbeFailure(err) {
+        const stderr = err && typeof err.stderr === 'string' ? err.stderr.trim() : ''
+        if (stderr) {
+            // Last non-empty line is usually the concise summary (e.g. Invalid data found…)
+            const lines = stderr.split('\n').map(l => l.trim()).filter(Boolean)
+            const summary = lines[lines.length - 1] || stderr
+            return summary.length > 300 ? `${summary.slice(0, 300)}…` : summary
+        }
+        return 'ffprobe could not read media'
+    }
+
+    /**
      * Get video file info using ffprobe
      */
     getVideoInfo(filePath) {
@@ -597,11 +614,23 @@ class PreGenerator {
                 height: videoParts[2] || 'unknown',
                 pixFmt: videoParts[3] || 'unknown',
                 bitDepth: videoParts[4] || '8',
-                audioCodec: audioCodec
+                audioCodec: audioCodec,
+                probeFailed: false
             }
         } catch (e) {
-            // Placeholder avoids the word "error" in the Processing log line (shipper ERROR_PATTERN).
-            return { codec: 'unreadable', width: '?', height: '?', pixFmt: '?', bitDepth: '?', audioCodec: '?', unreadable: true }
+            // Placeholder avoids the word "error" in codec — that string rides into the
+            // Processing log line and OrchLogShipper classifies it as ERROR.
+            return {
+                codec: 'unreadable',
+                width: '?',
+                height: '?',
+                pixFmt: '?',
+                bitDepth: '?',
+                audioCodec: '?',
+                unreadable: true,
+                probeFailed: true,
+                probeError: this.describeProbeFailure(e)
+            }
         }
     }
 
@@ -616,21 +645,24 @@ class PreGenerator {
             const baseName = path.basename(filePath)
 
             // Probe first. Corrupt/empty/truncated library files (e.g. invalid EBML at byte 0)
-            // must not spawn ffmpeg or emit ERROR-classified lines — that floods the log monitor.
+            // must not spawn ffmpeg or emit a Processing line that looks like a software ERROR.
             const videoInfo = this.getVideoInfo(filePath)
-            if (isUnreadableProbeResult(videoInfo)) {
+            if (isUnreadableProbeResult(videoInfo) || videoInfo.probeFailed) {
+                const reason = videoInfo.probeError || 'probe found no usable streams'
                 // Wording deliberately avoids error/failed/unable so classifyLevel → warn via "Skipping".
-                Log(tag, `Skipping unreadable media ${baseName} — probe found no usable streams`, channel, {
+                Log(tag, `Skipping unreadable media ${baseName} — ${reason}`, channel, {
                     file_path: filePath,
                     video_hash: videoHash,
-                    reason: 'probe_unreadable'
+                    video_id: videoId,
+                    reason: 'probe_unreadable',
+                    probe_error: reason
                 })
                 cleanupPartialOutput(outputDir)
                 resolve({ skipped: true, reason: 'unreadable' })
                 return
             }
 
-            // Create output directory
+            // Create output directory only when we intend to encode
             fs.mkdirSync(outputDir, { recursive: true })
 
             // Log video info before transcoding
@@ -843,6 +875,11 @@ class PreGenerator {
             } catch (err) {
                 if (this.shuttingDown) {
                     break
+                }
+                // Probe failures resolve as skipped (no throw). If UNREADABLE_MEDIA is still
+                // rejected by a future path, do not stack a second ERROR-classified line.
+                if (err && err.code === 'UNREADABLE_MEDIA') {
+                    continue
                 }
                 // Avoid "failed" in the message — it classifies as ERROR and files a log-monitor ticket
                 // even when generateVideo already logged the real failure. "Skipping" → warn.
