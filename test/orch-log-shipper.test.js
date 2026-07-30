@@ -249,6 +249,29 @@ test('classifyLevel escalates a neutral message that carries an error', () => {
     assert.equal(classifyLevel('retrying in 5s', {}), 'warn')
 })
 
+test('explicit enqueue level wins over failed/error message wording', () => {
+    const shipper = new OrchLogShipper({
+        endpointUrl: 'http://127.0.0.1:9/ingest',
+        secret: SECRET,
+        setTimeoutImpl: () => null
+    })
+    shipper.enqueue({
+        level: 'warn',
+        msg: 'Skipping unreadable media corrupt.mkv (exit code 183)',
+        source: 'PreGenerator',
+        fields: { exit_code: 183 }
+    })
+    assert.equal(shipper.queue[0].level, 'warn')
+    // Without explicit level the same wording would still be warn via "Skipping";
+    // "Failed to generate" would be error — confirm the override path works for that case too.
+    shipper.enqueue({
+        level: 'warn',
+        msg: 'Failed to generate corrupt.mkv (exit code 183)',
+        source: 'PreGenerator'
+    })
+    assert.equal(shipper.queue[1].level, 'warn')
+})
+
 test('batches at 100 records per request', async () => {
     const receiver = await startMockReceiver()
     const shipper = new OrchLogShipper({ endpointUrl: receiver.url, secret: SECRET })

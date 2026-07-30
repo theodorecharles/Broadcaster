@@ -514,20 +514,25 @@ test('generateVideo skips unreadable media without spawning ffmpeg', async t => 
         false,
         'must not emit Processing line for unreadable media'
     )
+    assert.equal(
+        logs.some(entry => /Failed to generate|Processing .*\[error/.test(entry.message)),
+        false
+    )
     const skipLog = logs.find(entry => entry.message.startsWith('Skipping unreadable media '))
     assert.match(skipLog.message, /Saturday Night Live \(1975\) - s43e13 - Natalie Portman\+Dua Lipa\.mkv/)
     assert.doesNotMatch(skipLog.message, /\b(error|failed|unable)\b/i)
     assert.equal(skipLog.context.reason, 'probe_unreadable')
+    assert.equal(skipLog.context.level, 'warn')
     assert.match(skipLog.context.probe_error, /Invalid data found when processing input/i)
 
     // Shipper level for the skip line must be warn, not error (log-monitor noise)
     const { classifyLevel } = require('../Utilities/OrchLogShipper.js')
     assert.equal(classifyLevel(skipLog.message, skipLog.context), 'warn')
 
-    // No empty HLS output directory created for a skipped probe failure
-    const videoHash = crypto.createHash('md5').update(filePath).digest('hex')
-    const outputDir = path.join(cacheDir, 'channels', channel.slug, 'videos', videoHash)
-    assert.equal(fs.existsSync(outputDir), false)
+    // Permanent unreadable marker so later queueChannel cycles skip this source
+    assert.equal(preGenerator.isMarkedUnreadable(filePath, channel.slug), true)
+    const marker = JSON.parse(fs.readFileSync(preGenerator.unreadableMarkerPath(filePath, channel.slug), 'utf8'))
+    assert.equal(marker.reason, 'ffprobe_failed')
 })
 
 test('startGeneration does not re-log unreadable media as Skipping failed video', async t => {
@@ -576,4 +581,97 @@ test('startGeneration does not re-log unreadable media as Skipping failed video'
         false,
         'probe skips resolve — queue must not log a second encode-exit skip'
     )
+})
+
+test('queueChannel skips videos marked unreadable', t => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
+
+    const filePath = '/library/corrupt.mkv'
+    const updates = []
+    // Not transcoded — would normally enter the queue.
+    const db = createDatabase(filePath, updates)
+    db.video.transcoded = 0
+
+    const preGenerator = loadPreGenerator(cacheDir, db)
+    const channel = { slug: 'news' }
+    const outputDir = path.join(
+        cacheDir,
+        'channels',
+        'news',
+        'videos',
+        db.video.hash
+    )
+    preGenerator.markMediaUnreadable(outputDir, filePath, 'ffprobe_failed')
+
+    preGenerator.queueChannel(channel)
+
+    assert.equal(preGenerator.channelQueues.length, 0)
+})
+
+test('generateVideo marks invalid-input ffmpeg exit as unreadable and resolves', async t => {
+    const childProcess = require('child_process')
+    const { EventEmitter } = require('events')
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
+
+    const filePath = '/library/bad.mkv'
+    const logs = []
+    process.env.CACHE_DIR = cacheDir
+    process.env.DIMENSIONS = process.env.DIMENSIONS || '720x480'
+    process.env.VIDEO_CODEC = process.env.VIDEO_CODEC || 'libx264'
+    process.env.AUDIO_CODEC = process.env.AUDIO_CODEC || 'aac'
+    process.env.AUDIO_BITRATE = process.env.AUDIO_BITRATE || '128k'
+    process.env.HLS_SEGMENT_LENGTH_SECONDS = process.env.HLS_SEGMENT_LENGTH_SECONDS || '6'
+
+    require.cache[logPath] = {
+        id: logPath,
+        filename: logPath,
+        loaded: true,
+        exports: (tag, message, channel, context) => {
+            logs.push({ tag, message, channel, context })
+        }
+    }
+    require.cache[databasePath] = {
+        id: databasePath,
+        filename: databasePath,
+        loaded: true,
+        exports: () => createDatabase(filePath, [])
+    }
+    delete require.cache[preGeneratorPath]
+    const preGenerator = require(preGeneratorPath)
+
+    t.mock.method(childProcess, 'execFileSync', (cmd, args) => {
+        if (cmd === 'ffprobe' && Array.isArray(args) && args.includes('a:0')) return 'aac\n'
+        if (cmd === 'ffprobe') return 'h264,yuv420p,1920,1080,8\n'
+        if (cmd === 'nvidia-smi') throw new Error('no gpu')
+        return ''
+    })
+
+    t.mock.method(childProcess, 'spawn', () => {
+        const proc = new EventEmitter()
+        proc.stderr = new EventEmitter()
+        proc.stdout = new EventEmitter()
+        proc.kill = () => {}
+        process.nextTick(() => {
+            proc.stderr.emit(
+                'data',
+                Buffer.from(
+                    '[matroska,webm @ 0x1] EBML header parsing failed\nError opening input: Invalid data found when processing input\n'
+                )
+            )
+            proc.emit('close', 183)
+        })
+        return proc
+    })
+
+    const channel = { slug: 'news', name: 'News' }
+    const result = await preGenerator.generateVideo(41, filePath, channel)
+
+    assert.deepEqual(result, { skipped: true, reason: 'unreadable' })
+    assert.equal(preGenerator.isMarkedUnreadable(filePath, 'news'), true)
+    const skipLog = logs.find(entry => /Skipping unreadable media/.test(entry.message))
+    assert.ok(skipLog)
+    assert.equal(skipLog.context.level, 'warn')
+    assert.equal(logs.some(entry => /Failed to generate|^Error:/.test(entry.message)), false)
 })
