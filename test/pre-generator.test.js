@@ -413,3 +413,98 @@ test('getVideoInfo passes media path as execFileSync argv (no shell)', t => {
         assert.equal(call.opts && call.opts.shell, undefined)
     }
 })
+
+test('isUnreadableMediaStderr matches EBML / invalid-data library failures', () => {
+    const { isUnreadableMediaStderr } = require('../Utilities/PreGenerator.js')
+    const snlStderr = [
+        'Error: core of 1, misdetection possible!',
+        '[matroska,webm @ 0x5562b5598480] 0x00 at pos 0 (0x0) invalid as first byte of an EBML number',
+        '[matroska,webm @ 0x5562b5598480] EBML header parsing failed',
+        '[in#0 @ 0x5562b5598380] Error opening input: Invalid data found when processing input',
+        'Error opening input file /media/TV Shows/Saturday Night Live.mkv.',
+        'Error opening input files: Invalid data found when processing input'
+    ].join('\n')
+
+    assert.equal(isUnreadableMediaStderr(snlStderr), true)
+    assert.equal(isUnreadableMediaStderr('moov atom not found'), true)
+    assert.equal(isUnreadableMediaStderr('No such file or directory'), true)
+    assert.equal(isUnreadableMediaStderr(''), false)
+    assert.equal(isUnreadableMediaStderr('frame=  120 fps=30 q=28.0 size=N/A time=00:00:04.00'), false)
+})
+
+test('isUnreadableProbeResult detects probe placeholders', () => {
+    const { isUnreadableProbeResult } = require('../Utilities/PreGenerator.js')
+    assert.equal(isUnreadableProbeResult({ codec: 'unreadable' }), true)
+    assert.equal(isUnreadableProbeResult({ codec: 'error' }), true)
+    assert.equal(isUnreadableProbeResult({ codec: '?' }), true)
+    assert.equal(isUnreadableProbeResult({ codec: '' }), true)
+    assert.equal(isUnreadableProbeResult(null), true)
+    assert.equal(isUnreadableProbeResult({ codec: 'h264' }), false)
+    assert.equal(isUnreadableProbeResult({ codec: 'hevc' }), false)
+})
+
+test('getVideoInfo returns unreadable placeholder when ffprobe throws', t => {
+    const childProcess = require('child_process')
+    t.mock.method(childProcess, 'execFileSync', () => {
+        const err = new Error('ffprobe exited 1')
+        err.status = 1
+        throw err
+    })
+
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/broken.mkv', []))
+    const info = preGenerator.getVideoInfo('/library/broken.mkv')
+
+    assert.equal(info.codec, 'unreadable')
+    assert.equal(info.unreadable, true)
+    assert.equal(info.width, '?')
+    assert.equal(info.audioCodec, '?')
+})
+
+test('generateVideo skips without spawning ffmpeg when probe finds no streams', async t => {
+    const childProcess = require('child_process')
+    const logs = []
+    const spawnCalls = []
+
+    t.mock.method(childProcess, 'execFileSync', () => {
+        throw new Error('Invalid data found when processing input')
+    })
+    t.mock.method(childProcess, 'spawn', (...args) => {
+        spawnCalls.push(args)
+        throw new Error('spawn should not be called for unreadable media')
+    })
+
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
+
+    process.env.CACHE_DIR = cacheDir
+    delete require.cache[preGeneratorPath]
+    require.cache[databasePath] = {
+        id: databasePath,
+        filename: databasePath,
+        loaded: true,
+        exports: () => createDatabase('/library/broken.mkv', [])
+    }
+    require.cache[logPath] = {
+        id: logPath,
+        filename: logPath,
+        loaded: true,
+        exports: (tag, message, channel, context) => {
+            logs.push({ tag, message, channel, context })
+        }
+    }
+
+    const preGenerator = require(preGeneratorPath)
+    const channel = { slug: 'late-night', name: 'Late Night' }
+    const result = await preGenerator.generateVideo(99, '/library/broken.mkv', channel)
+
+    assert.deepEqual(result, { skipped: true, reason: 'unreadable' })
+    assert.equal(spawnCalls.length, 0)
+    assert.equal(logs.length, 1)
+    assert.match(logs[0].message, /^Skipping unreadable media broken\.mkv/)
+    assert.doesNotMatch(logs[0].message, /\b(error|failed|unable)\b/i)
+    assert.equal(logs[0].context.reason, 'probe_unreadable')
+
+    const { classifyLevel } = require('../Utilities/OrchLogShipper.js')
+    assert.equal(classifyLevel(logs[0].message, logs[0].context), 'warn')
+})
