@@ -262,7 +262,8 @@ function getShipper() {
 
 // `context` is either the normalized shape from LogContext.normalizeContext() ({ fields }) or a plain
 // object of fields; both are accepted so callers outside Log() can ship structured detail too.
-function shipLogRecord(tag, message, channel, context) {
+// Optional `level` wins over message/heuristic classification when it is a known level name.
+function shipLogRecord(tag, message, channel, context, level) {
     try {
         const shipper = getShipper()
         if (!shipper.enabled) return false
@@ -273,7 +274,8 @@ function shipLogRecord(tag, message, channel, context) {
             msg: message,
             source: tag,
             channel: channel && channel.name ? channel.name : undefined,
-            fields
+            fields,
+            level: typeof level === 'string' ? level : undefined
         })
     } catch (e) {
         return false

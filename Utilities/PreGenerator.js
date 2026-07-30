@@ -32,6 +32,44 @@ function deinterlacePrefix(videoFilter, useCuda) {
     return useCuda ? 'yadif_cuda,' : 'yadif,'
 }
 
+/**
+ * Probe result from getVideoInfo when ffprobe cannot open the file or finds no video stream.
+ * The codec placeholder used to be the literal string "error", which made the Processing log
+ * line classify as ERROR in the log shipper.
+ * @param {{codec?: string}|null|undefined} videoInfo
+ * @returns {boolean}
+ */
+function isUnreadableProbeResult(videoInfo) {
+    if (!videoInfo || typeof videoInfo !== 'object') return true
+    if (videoInfo.probeFailed || videoInfo.unreadable) return true
+    const codec = videoInfo.codec
+    return codec === 'unreadable' || codec === 'error' || codec === '?' || codec === ''
+}
+
+/**
+ * FFmpeg/ffprobe stderr that indicates bad library media (corrupt, empty, truncated, missing)
+ * rather than an encode-path or host problem. These should log at warn and skip the item.
+ * Superset of the earlier isInvalidMediaStderr signatures (EBML, moov, Error opening input, etc.).
+ * @param {string} stderr
+ * @returns {boolean}
+ */
+function isUnreadableMediaStderr(stderr) {
+    if (typeof stderr !== 'string' || stderr.length === 0) return false
+    return /Invalid data found when processing input/i.test(stderr) ||
+        /Invalid data found/i.test(stderr) ||
+        /EBML header parsing failed/i.test(stderr) ||
+        /invalid as first byte of an EBML number/i.test(stderr) ||
+        /misdetection possible/i.test(stderr) ||
+        /Error opening input/i.test(stderr) ||
+        /moov atom not found/i.test(stderr) ||
+        /End of file/i.test(stderr) ||
+        /does not contain any stream/i.test(stderr) ||
+        /could not find codec parameters/i.test(stderr) ||
+        /Invalid argument/i.test(stderr) && /matroska|webm|mov|mp4|avi|mpeg/i.test(stderr) ||
+        /No such file or directory/i.test(stderr) ||
+        /Permission denied/i.test(stderr)
+}
+
 function checkNvidiaGPU() {
     if (gpuCheckDone) return hasNvidiaGPU
 
@@ -195,6 +233,59 @@ class PreGenerator {
      */
     getVideoHash(filePath) {
         return crypto.createHash('md5').update(filePath).digest('hex')
+    }
+
+    /**
+     * Cache-relative path for a per-video unreadable marker (corrupt / unprobeable source).
+     */
+    unreadableMarkerPath(filePath, channelSlug) {
+        const videoHash = this.getVideoHash(filePath)
+        return path.join(CACHE_DIR, 'channels', channelSlug, 'videos', videoHash, 'unreadable.json')
+    }
+
+    isMarkedUnreadable(filePath, channelSlug) {
+        try {
+            return fs.existsSync(this.unreadableMarkerPath(filePath, channelSlug))
+        } catch (_) {
+            return false
+        }
+    }
+
+    /**
+     * Record that a source file cannot be transcoded so the queue does not retry every cycle.
+     * Clears any partial HLS output first. Operator can delete unreadable.json after fixing media.
+     */
+    markMediaUnreadable(outputDir, filePath, reason, extra = {}) {
+        try {
+            if (fs.existsSync(outputDir)) {
+                for (const file of fs.readdirSync(outputDir)) {
+                    try {
+                        fs.unlinkSync(path.join(outputDir, file))
+                    } catch (_) {
+                        // best-effort cleanup
+                    }
+                }
+            } else {
+                fs.mkdirSync(outputDir, { recursive: true })
+            }
+            const payload = {
+                originalPath: filePath,
+                reason,
+                markedAt: new Date().toISOString(),
+                ...extra
+            }
+            fs.writeFileSync(
+                path.join(outputDir, 'unreadable.json'),
+                JSON.stringify(payload, null, 2)
+            )
+        } catch (e) {
+            Log(tag, `Could not write unreadable marker for ${path.basename(filePath)}: ${e.message}`, undefined, {
+                level: 'warn',
+                output_dir: outputDir,
+                file_path: filePath,
+                reason
+            })
+        }
     }
 
     /**
@@ -461,6 +552,11 @@ class PreGenerator {
         let skippedCount = 0
 
         allVideos.forEach(video => {
+            // Corrupt/unreadable sources are marked once and left out of the queue.
+            if (this.isMarkedUnreadable(video.file_path, channel.slug)) {
+                skippedCount++
+                return
+            }
             // Database-positive rows still need their cached files verified.
             if (
                 transcodedPaths.has(video.file_path) &&
@@ -503,6 +599,22 @@ class PreGenerator {
         }
 
         this.totalVideos = this.generationQueue.length
+    }
+
+    /**
+     * Pull a short human-readable reason from an execFileSync/ffprobe failure.
+     * Prefer stderr (demuxer detail). Never fall back to Node's "Command failed: …"
+     * string — the word "failed" makes OrchLogShipper classify the skip line as ERROR.
+     */
+    describeProbeFailure(err) {
+        const stderr = err && typeof err.stderr === 'string' ? err.stderr.trim() : ''
+        if (stderr) {
+            // Last non-empty line is usually the concise summary (e.g. Invalid data found…)
+            const lines = stderr.split('\n').map(l => l.trim()).filter(Boolean)
+            const summary = lines[lines.length - 1] || stderr
+            return summary.length > 300 ? `${summary.slice(0, 300)}…` : summary
+        }
+        return 'ffprobe could not read media'
     }
 
     /**
@@ -551,10 +663,23 @@ class PreGenerator {
                 height: videoParts[2] || 'unknown',
                 pixFmt: videoParts[3] || 'unknown',
                 bitDepth: videoParts[4] || '8',
-                audioCodec: audioCodec
+                audioCodec: audioCodec,
+                probeFailed: false
             }
         } catch (e) {
-            return { codec: 'error', width: '?', height: '?', pixFmt: '?', bitDepth: '?', audioCodec: '?' }
+            // Placeholder avoids the word "error" in codec — that string rides into the
+            // Processing log line and OrchLogShipper classifies it as ERROR.
+            return {
+                codec: 'unreadable',
+                width: '?',
+                height: '?',
+                pixFmt: '?',
+                bitDepth: '?',
+                audioCodec: '?',
+                unreadable: true,
+                probeFailed: true,
+                probeError: this.describeProbeFailure(e)
+            }
         }
     }
 
@@ -566,13 +691,35 @@ class PreGenerator {
             const videoHash = this.getVideoHash(filePath)
             const outputDir = path.join(CACHE_DIR, 'channels', channel.slug, 'videos', videoHash)
             const outputPath = path.join(outputDir, 'index.m3u8')
+            const baseName = path.basename(filePath)
 
-            // Create output directory
+            // Probe first. Corrupt/empty/truncated library files (e.g. invalid EBML at byte 0)
+            // must not spawn ffmpeg or emit a Processing line that looks like a software ERROR.
+            const videoInfo = this.getVideoInfo(filePath)
+            if (isUnreadableProbeResult(videoInfo) || videoInfo.probeFailed) {
+                const reason = videoInfo.probeError || 'probe found no usable streams'
+                // Permanent marker so queueChannel skips this source on later cycles.
+                this.markMediaUnreadable(outputDir, filePath, 'ffprobe_failed', {
+                    probe_error: reason
+                })
+                // Wording deliberately avoids error/failed/unable so classifyLevel → warn via "Skipping".
+                Log(tag, `Skipping unreadable media ${baseName} — ${reason}`, channel, {
+                    level: 'warn',
+                    file_path: filePath,
+                    video_hash: videoHash,
+                    video_id: videoId,
+                    reason: 'probe_unreadable',
+                    probe_error: reason
+                })
+                resolve({ skipped: true, reason: 'unreadable' })
+                return
+            }
+
+            // Create output directory only when we intend to encode
             fs.mkdirSync(outputDir, { recursive: true })
 
             // Log video info before transcoding
-            const videoInfo = this.getVideoInfo(filePath)
-            Log(tag, `Processing ${path.basename(filePath)} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit | audio: ${videoInfo.audioCodec}]`, channel)
+            Log(tag, `Processing ${baseName} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit | audio: ${videoInfo.audioCodec}]`, channel)
 
             const hasGPU = checkNvidiaGPU()
             const [width] = DIMENSIONS.split('x')
@@ -643,7 +790,7 @@ class PreGenerator {
                 }
                 if (code === 0) {
                     const duration = (Date.now() - startTime) / 1000
-                    Log(tag, `Generated ${path.basename(filePath)} in ${duration.toFixed(1)}s [${this.currentIndex}/${this.totalVideos}]`, channel)
+                    Log(tag, `Generated ${baseName} in ${duration.toFixed(1)}s [${this.currentIndex}/${this.totalVideos}]`, channel)
 
                     // Get video duration and segment count from the generated playlist
                     let videoDuration = 0
@@ -696,15 +843,44 @@ class PreGenerator {
                     }
 
                     resolve()
+                } else if (isUnreadableMediaStderr(stderrData)) {
+                    // Library media problem, not an encode-path bug. One warn line; no raw Error: dump.
+                    // Mark permanently so queueChannel does not re-queue every cycle.
+                    const tail = stderrData.slice(-500)
+                    this.markMediaUnreadable(outputDir, filePath, 'ffmpeg_invalid_input', {
+                        exit_code: code,
+                        ffmpeg_stderr_tail: tail
+                    })
+                    Log(tag, `Skipping unreadable media ${baseName} (encode exit ${code})`, channel, {
+                        level: 'warn',
+                        exit_code: code,
+                        file_path: filePath,
+                        video_hash: videoHash,
+                        reason: 'encode_unreadable',
+                        ffmpeg_stderr_tail: tail
+                    })
+                    resolve({ skipped: true, reason: 'unreadable' })
                 } else {
-                    Log(tag, `Failed to generate ${path.basename(filePath)} (exit code ${code})`, channel, { exit_code: code, file_path: filePath, video_hash: videoHash, ffmpeg_stderr_tail: stderrData.slice(-500) })
-                    Log(tag, `Error: ${stderrData.slice(-500)}`, channel)
+                    // Unexpected encode failure. Avoid the log-monitor signature "Failed to generate".
+                    // Keep stderr detail in context only — a second "Error: …" line was a signature of its own.
+                    Log(tag, `Could not generate ${baseName} (exit code ${code})`, channel, {
+                        level: 'error',
+                        exit_code: code,
+                        file_path: filePath,
+                        video_hash: videoHash,
+                        ffmpeg_stderr_tail: stderrData.slice(-500)
+                    })
                     reject(new Error(`FFmpeg exited with code ${code}`))
                 }
             })
 
             ffmpeg.on('error', (err) => {
-                Log(tag, `FFmpeg error for ${path.basename(filePath)}: ${err.message}`, channel, { error: err, file_path: filePath, video_hash: videoHash })
+                Log(tag, `Could not start ffmpeg for ${baseName}: ${err.message}`, channel, {
+                    level: 'error',
+                    error: err,
+                    file_path: filePath,
+                    video_hash: videoHash
+                })
                 reject(err)
             })
         })
@@ -766,7 +942,18 @@ class PreGenerator {
                 if (this.shuttingDown) {
                     break
                 }
-                Log(tag, `Skipping failed video: ${item.filePath}`)
+                // Probe/unreadable paths resolve as skipped (no throw). If a path still rejects with
+                // UNREADABLE_MEDIA / mediaSkip, do not stack a second ERROR-classified line.
+                if (err && (err.code === 'UNREADABLE_MEDIA' || err.mediaSkip || err.unreadableMedia)) {
+                    continue
+                }
+                // generateVideo already logged unexpected failures at error level.
+                // Avoid "failed" in a second message — it classifies as ERROR and files a log-monitor
+                // ticket even when the real failure was already recorded. "Skipping" → warn.
+                Log(tag, `Skipping video after encode exit: ${item.filePath}`, item.channel, {
+                    file_path: item.filePath,
+                    reason: err && err.message ? err.message : 'encode_exit'
+                })
             }
         }
 
@@ -797,4 +984,6 @@ const preGenerator = new PreGenerator()
 module.exports = preGenerator
 module.exports.resolveEncodeSettings = resolveEncodeSettings
 module.exports.deinterlacePrefix = deinterlacePrefix
+module.exports.isUnreadableProbeResult = isUnreadableProbeResult
+module.exports.isUnreadableMediaStderr = isUnreadableMediaStderr
 

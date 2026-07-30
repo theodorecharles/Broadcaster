@@ -249,6 +249,29 @@ test('classifyLevel escalates a neutral message that carries an error', () => {
     assert.equal(classifyLevel('retrying in 5s', {}), 'warn')
 })
 
+test('explicit enqueue level wins over failed/error message wording', () => {
+    const shipper = new OrchLogShipper({
+        endpointUrl: 'http://127.0.0.1:9/ingest',
+        secret: SECRET,
+        setTimeoutImpl: () => null
+    })
+    shipper.enqueue({
+        level: 'warn',
+        msg: 'Skipping unreadable media corrupt.mkv (exit code 183)',
+        source: 'PreGenerator',
+        fields: { exit_code: 183 }
+    })
+    assert.equal(shipper.queue[0].level, 'warn')
+    // Without explicit level the same wording would still be warn via "Skipping";
+    // "Failed to generate" would be error — confirm the override path works for that case too.
+    shipper.enqueue({
+        level: 'warn',
+        msg: 'Failed to generate corrupt.mkv (exit code 183)',
+        source: 'PreGenerator'
+    })
+    assert.equal(shipper.queue[1].level, 'warn')
+})
+
 test('batches at 100 records per request', async () => {
     const receiver = await startMockReceiver()
     const shipper = new OrchLogShipper({ endpointUrl: receiver.url, secret: SECRET })
@@ -374,6 +397,38 @@ test('level is inferred from message text when the caller has none', () => {
     assert.equal(classifyLevel('Retrying ffprobe'), 'warn')
     assert.equal(classifyLevel('Web UI started and ready'), 'info')
     assert.equal(classifyLevel(undefined), 'info')
+    // Unreadable library media: warn, not ERROR (avoids log-monitor tickets for bad files)
+    assert.equal(
+        classifyLevel('Skipping unreadable media show.mkv — probe found no usable streams'),
+        'warn'
+    )
+    assert.equal(
+        classifyLevel('Skipping unreadable media show.mkv (encode exit 183)'),
+        'warn'
+    )
+    assert.equal(
+        classifyLevel('Skipping video after encode exit: /media/show.mkv'),
+        'warn'
+    )
+    // Legacy wording that used to fire tickets for the same corrupt file
+    assert.equal(classifyLevel('Failed to generate show.mkv (exit code 183)'), 'error')
+    assert.equal(classifyLevel('Error: core of 1, misdetection possible!'), 'error')
+    assert.equal(classifyLevel('Skipping failed video: /media/show.mkv'), 'error')
+})
+
+// PreGenerator unreadable-media wording (#3597): must stay WARN so log-monitor
+// does not re-file tickets for corrupt library files.
+test('unreadable-media skip messages classify as warn, not error', () => {
+    assert.equal(classifyLevel('Skipping failed video: /media/bad.mkv'), 'error')
+    assert.equal(classifyLevel('Skipping unreadable media: bad.mkv'), 'warn')
+    assert.equal(classifyLevel('Skipping unreadable video: /media/bad.mkv'), 'warn')
+    assert.equal(classifyLevel('Skipping encode for unreadable source: bad.mkv (exit 183)'), 'warn')
+    assert.equal(classifyLevel('Skipping video after unexpected issue: /media/bad.mkv'), 'warn')
+    assert.equal(classifyLevel('Processing bad.mkv [error ?x? ? ?bit | audio: ?]'), 'error')
+    assert.equal(classifyLevel('Processing bad.mkv [unreadable ?x? ? ?bit | audio: ?]'), 'info')
+    assert.equal(classifyLevel('Failed to generate bad.mkv (exit code 183)'), 'error')
+    assert.equal(classifyLevel('Error: EBML header parsing failed'), 'error')
+    // stderr tails go in context fields now — never as a second message body
 })
 
 // Opt-in: hits the real orchestrator endpoint when the container/CI environment supplies both vars.
