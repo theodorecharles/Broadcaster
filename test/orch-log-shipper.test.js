@@ -374,6 +374,23 @@ test('level is inferred from message text when the caller has none', () => {
     assert.equal(classifyLevel('Retrying ffprobe'), 'warn')
     assert.equal(classifyLevel('Web UI started and ready'), 'info')
     assert.equal(classifyLevel(undefined), 'info')
+    // Unreadable library media: warn, not ERROR (avoids log-monitor tickets for bad files)
+    assert.equal(
+        classifyLevel('Skipping unreadable media show.mkv — probe found no usable streams'),
+        'warn'
+    )
+    assert.equal(
+        classifyLevel('Skipping unreadable media show.mkv (encode exit 183)'),
+        'warn'
+    )
+    assert.equal(
+        classifyLevel('Skipping video after encode exit: /media/show.mkv'),
+        'warn'
+    )
+    // Legacy wording that used to fire tickets for the same corrupt file
+    assert.equal(classifyLevel('Failed to generate show.mkv (exit code 183)'), 'error')
+    assert.equal(classifyLevel('Error: core of 1, misdetection possible!'), 'error')
+    assert.equal(classifyLevel('Skipping failed video: /media/show.mkv'), 'error')
 })
 
 // Opt-in: hits the real orchestrator endpoint when the container/CI environment supplies both vars.
