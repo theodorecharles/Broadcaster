@@ -32,6 +32,18 @@ function deinterlacePrefix(videoFilter, useCuda) {
     return useCuda ? 'yadif_cuda,' : 'yadif,'
 }
 
+/**
+ * True when ffmpeg/ffprobe stderr indicates the source file is not valid media
+ * (corrupt container, truncated download, empty file, etc.) rather than an encoder fault.
+ * Exported for unit tests.
+ * @param {string} stderr
+ * @returns {boolean}
+ */
+function isInvalidMediaStderr(stderr) {
+    if (!stderr || typeof stderr !== 'string') return false
+    return /EBML header parsing failed|Invalid data found when processing input|Error opening input|moov atom not found|does not contain any stream/i.test(stderr)
+}
+
 function checkNvidiaGPU() {
     if (gpuCheckDone) return hasNvidiaGPU
 
@@ -195,6 +207,59 @@ class PreGenerator {
      */
     getVideoHash(filePath) {
         return crypto.createHash('md5').update(filePath).digest('hex')
+    }
+
+    /**
+     * Cache-relative path for a per-video unreadable marker (corrupt / unprobeable source).
+     */
+    unreadableMarkerPath(filePath, channelSlug) {
+        const videoHash = this.getVideoHash(filePath)
+        return path.join(CACHE_DIR, 'channels', channelSlug, 'videos', videoHash, 'unreadable.json')
+    }
+
+    isMarkedUnreadable(filePath, channelSlug) {
+        try {
+            return fs.existsSync(this.unreadableMarkerPath(filePath, channelSlug))
+        } catch (_) {
+            return false
+        }
+    }
+
+    /**
+     * Record that a source file cannot be transcoded so the queue does not retry every cycle.
+     * Clears any partial HLS output first. Operator can delete unreadable.json after fixing media.
+     */
+    markMediaUnreadable(outputDir, filePath, reason, extra = {}) {
+        try {
+            if (fs.existsSync(outputDir)) {
+                for (const file of fs.readdirSync(outputDir)) {
+                    try {
+                        fs.unlinkSync(path.join(outputDir, file))
+                    } catch (_) {
+                        // best-effort cleanup
+                    }
+                }
+            } else {
+                fs.mkdirSync(outputDir, { recursive: true })
+            }
+            const payload = {
+                originalPath: filePath,
+                reason,
+                markedAt: new Date().toISOString(),
+                ...extra
+            }
+            fs.writeFileSync(
+                path.join(outputDir, 'unreadable.json'),
+                JSON.stringify(payload, null, 2)
+            )
+        } catch (e) {
+            Log(tag, `Could not write unreadable marker for ${path.basename(filePath)}: ${e.message}`, undefined, {
+                level: 'warn',
+                output_dir: outputDir,
+                file_path: filePath,
+                reason
+            })
+        }
     }
 
     /**
@@ -461,6 +526,11 @@ class PreGenerator {
         let skippedCount = 0
 
         allVideos.forEach(video => {
+            // Corrupt/unreadable sources are marked once and left out of the queue.
+            if (this.isMarkedUnreadable(video.file_path, channel.slug)) {
+                skippedCount++
+                return
+            }
             // Database-positive rows still need their cached files verified.
             if (
                 transcodedPaths.has(video.file_path) &&
@@ -566,13 +636,26 @@ class PreGenerator {
             const videoHash = this.getVideoHash(filePath)
             const outputDir = path.join(CACHE_DIR, 'channels', channel.slug, 'videos', videoHash)
             const outputPath = path.join(outputDir, 'index.m3u8')
+            const baseName = path.basename(filePath)
 
             // Create output directory
             fs.mkdirSync(outputDir, { recursive: true })
 
-            // Log video info before transcoding
+            // Probe first — unreadable/corrupt sources should not start ffmpeg or page ERROR.
             const videoInfo = this.getVideoInfo(filePath)
-            Log(tag, `Processing ${path.basename(filePath)} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit | audio: ${videoInfo.audioCodec}]`, channel)
+            if (videoInfo.codec === 'error') {
+                this.markMediaUnreadable(outputDir, filePath, 'ffprobe_failed')
+                Log(tag, `Skipping unreadable media ${baseName} — probe found no playable stream`, channel, {
+                    level: 'warn',
+                    file_path: filePath,
+                    video_hash: videoHash,
+                    reason: 'ffprobe_failed'
+                })
+                resolve()
+                return
+            }
+
+            Log(tag, `Processing ${baseName} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit | audio: ${videoInfo.audioCodec}]`, channel)
 
             const hasGPU = checkNvidiaGPU()
             const [width] = DIMENSIONS.split('x')
@@ -643,7 +726,7 @@ class PreGenerator {
                 }
                 if (code === 0) {
                     const duration = (Date.now() - startTime) / 1000
-                    Log(tag, `Generated ${path.basename(filePath)} in ${duration.toFixed(1)}s [${this.currentIndex}/${this.totalVideos}]`, channel)
+                    Log(tag, `Generated ${baseName} in ${duration.toFixed(1)}s [${this.currentIndex}/${this.totalVideos}]`, channel)
 
                     // Get video duration and segment count from the generated playlist
                     let videoDuration = 0
@@ -697,14 +780,43 @@ class PreGenerator {
 
                     resolve()
                 } else {
-                    Log(tag, `Failed to generate ${path.basename(filePath)} (exit code ${code})`, channel, { exit_code: code, file_path: filePath, video_hash: videoHash, ffmpeg_stderr_tail: stderrData.slice(-500) })
-                    Log(tag, `Error: ${stderrData.slice(-500)}`, channel)
+                    const tail = stderrData.slice(-500)
+                    const invalidMedia = isInvalidMediaStderr(stderrData)
+                    if (invalidMedia) {
+                        // Bad library file — warn once, mark, and do not re-page as ERROR.
+                        this.markMediaUnreadable(outputDir, filePath, 'ffmpeg_invalid_input', {
+                            exit_code: code,
+                            ffmpeg_stderr_tail: tail
+                        })
+                        Log(tag, `Skipping unreadable media ${baseName} (exit code ${code})`, channel, {
+                            level: 'warn',
+                            exit_code: code,
+                            file_path: filePath,
+                            video_hash: videoHash,
+                            ffmpeg_stderr_tail: tail,
+                            reason: 'ffmpeg_invalid_input'
+                        })
+                        resolve()
+                        return
+                    }
+                    Log(tag, `Could not generate ${baseName} (exit code ${code})`, channel, {
+                        level: 'error',
+                        exit_code: code,
+                        file_path: filePath,
+                        video_hash: videoHash,
+                        ffmpeg_stderr_tail: tail
+                    })
                     reject(new Error(`FFmpeg exited with code ${code}`))
                 }
             })
 
             ffmpeg.on('error', (err) => {
-                Log(tag, `FFmpeg error for ${path.basename(filePath)}: ${err.message}`, channel, { error: err, file_path: filePath, video_hash: videoHash })
+                Log(tag, `Could not start ffmpeg for ${baseName}: ${err.message}`, channel, {
+                    level: 'error',
+                    error: err,
+                    file_path: filePath,
+                    video_hash: videoHash
+                })
                 reject(err)
             })
         })
@@ -766,7 +878,7 @@ class PreGenerator {
                 if (this.shuttingDown) {
                     break
                 }
-                Log(tag, `Skipping failed video: ${item.filePath}`)
+                // generateVideo already logged unexpected failures at error level.
             }
         }
 
@@ -797,4 +909,5 @@ const preGenerator = new PreGenerator()
 module.exports = preGenerator
 module.exports.resolveEncodeSettings = resolveEncodeSettings
 module.exports.deinterlacePrefix = deinterlacePrefix
+module.exports.isInvalidMediaStderr = isInvalidMediaStderr
 
