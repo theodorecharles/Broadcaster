@@ -506,6 +506,22 @@ class PreGenerator {
     }
 
     /**
+     * Pull a short human-readable reason from an execFileSync/ffprobe failure.
+     * Prefer stderr (demuxer detail). Never fall back to Node's "Command failed: …"
+     * string — the word "failed" makes OrchLogShipper classify the skip line as ERROR.
+     */
+    describeProbeFailure(err) {
+        const stderr = err && typeof err.stderr === 'string' ? err.stderr.trim() : ''
+        if (stderr) {
+            // Last non-empty line is usually the concise summary (e.g. Invalid data found…)
+            const lines = stderr.split('\n').map(l => l.trim()).filter(Boolean)
+            const summary = lines[lines.length - 1] || stderr
+            return summary.length > 300 ? `${summary.slice(0, 300)}…` : summary
+        }
+        return 'ffprobe could not read media'
+    }
+
+    /**
      * Get video file info using ffprobe
      */
     getVideoInfo(filePath) {
@@ -551,10 +567,22 @@ class PreGenerator {
                 height: videoParts[2] || 'unknown',
                 pixFmt: videoParts[3] || 'unknown',
                 bitDepth: videoParts[4] || '8',
-                audioCodec: audioCodec
+                audioCodec: audioCodec,
+                probeFailed: false
             }
         } catch (e) {
-            return { codec: 'error', width: '?', height: '?', pixFmt: '?', bitDepth: '?', audioCodec: '?' }
+            // Do not put the word "error" in codec — that string rides into the
+            // Processing log line and OrchLogShipper classifies it as ERROR.
+            return {
+                codec: 'unknown',
+                width: '?',
+                height: '?',
+                pixFmt: '?',
+                bitDepth: '?',
+                audioCodec: '?',
+                probeFailed: true,
+                probeError: this.describeProbeFailure(e)
+            }
         }
     }
 
@@ -566,13 +594,30 @@ class PreGenerator {
             const videoHash = this.getVideoHash(filePath)
             const outputDir = path.join(CACHE_DIR, 'channels', channel.slug, 'videos', videoHash)
             const outputPath = path.join(outputDir, 'index.m3u8')
+            const fileName = path.basename(filePath)
 
-            // Create output directory
+            // Probe first — unreadable/corrupt library files must not spawn ffmpeg
+            // or emit a Processing line that looks like a software ERROR.
+            const videoInfo = this.getVideoInfo(filePath)
+            if (videoInfo.probeFailed) {
+                const reason = videoInfo.probeError || 'ffprobe could not read media'
+                // Wording uses "Skipping" so shipper level is warn (library issue, not a crash).
+                Log(tag, `Skipping unreadable video: ${fileName} — ${reason}`, channel, {
+                    file_path: filePath,
+                    video_hash: videoHash,
+                    video_id: videoId,
+                    probe_error: reason
+                })
+                const err = new Error(`Unreadable media: ${fileName}`)
+                err.code = 'UNREADABLE_MEDIA'
+                reject(err)
+                return
+            }
+
+            // Create output directory only when we intend to encode
             fs.mkdirSync(outputDir, { recursive: true })
 
-            // Log video info before transcoding
-            const videoInfo = this.getVideoInfo(filePath)
-            Log(tag, `Processing ${path.basename(filePath)} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit | audio: ${videoInfo.audioCodec}]`, channel)
+            Log(tag, `Processing ${fileName} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit | audio: ${videoInfo.audioCodec}]`, channel)
 
             const hasGPU = checkNvidiaGPU()
             const [width] = DIMENSIONS.split('x')
@@ -643,7 +688,7 @@ class PreGenerator {
                 }
                 if (code === 0) {
                     const duration = (Date.now() - startTime) / 1000
-                    Log(tag, `Generated ${path.basename(filePath)} in ${duration.toFixed(1)}s [${this.currentIndex}/${this.totalVideos}]`, channel)
+                    Log(tag, `Generated ${fileName} in ${duration.toFixed(1)}s [${this.currentIndex}/${this.totalVideos}]`, channel)
 
                     // Get video duration and segment count from the generated playlist
                     let videoDuration = 0
@@ -697,14 +742,14 @@ class PreGenerator {
 
                     resolve()
                 } else {
-                    Log(tag, `Failed to generate ${path.basename(filePath)} (exit code ${code})`, channel, { exit_code: code, file_path: filePath, video_hash: videoHash, ffmpeg_stderr_tail: stderrData.slice(-500) })
+                    Log(tag, `Failed to generate ${fileName} (exit code ${code})`, channel, { exit_code: code, file_path: filePath, video_hash: videoHash, ffmpeg_stderr_tail: stderrData.slice(-500) })
                     Log(tag, `Error: ${stderrData.slice(-500)}`, channel)
                     reject(new Error(`FFmpeg exited with code ${code}`))
                 }
             })
 
             ffmpeg.on('error', (err) => {
-                Log(tag, `FFmpeg error for ${path.basename(filePath)}: ${err.message}`, channel, { error: err, file_path: filePath, video_hash: videoHash })
+                Log(tag, `FFmpeg error for ${fileName}: ${err.message}`, channel, { error: err, file_path: filePath, video_hash: videoHash })
                 reject(err)
             })
         })
@@ -766,7 +811,14 @@ class PreGenerator {
                 if (this.shuttingDown) {
                     break
                 }
-                Log(tag, `Skipping failed video: ${item.filePath}`)
+                // Probe failures already logged as warn with path + reason; don't stack ERROR noise.
+                if (err && err.code === 'UNREADABLE_MEDIA') {
+                    continue
+                }
+                Log(tag, `Skipping failed video: ${item.filePath}`, item.channel, {
+                    file_path: item.filePath,
+                    error: err
+                })
             }
         }
 
