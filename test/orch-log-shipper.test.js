@@ -376,6 +376,21 @@ test('level is inferred from message text when the caller has none', () => {
     assert.equal(classifyLevel(undefined), 'info')
 })
 
+// PreGenerator unreadable-media wording (#3597): must stay WARN so log-monitor
+// does not re-file tickets for corrupt library files.
+test('unreadable-media skip messages classify as warn, not error', () => {
+    assert.equal(classifyLevel('Skipping failed video: /media/bad.mkv'), 'error')
+    assert.equal(classifyLevel('Skipping unreadable media: bad.mkv'), 'warn')
+    assert.equal(classifyLevel('Skipping unreadable video: /media/bad.mkv'), 'warn')
+    assert.equal(classifyLevel('Skipping encode for unreadable source: bad.mkv (exit 183)'), 'warn')
+    assert.equal(classifyLevel('Skipping video after unexpected issue: /media/bad.mkv'), 'warn')
+    assert.equal(classifyLevel('Processing bad.mkv [error ?x? ? ?bit | audio: ?]'), 'error')
+    assert.equal(classifyLevel('Processing bad.mkv [unreadable ?x? ? ?bit | audio: ?]'), 'info')
+    assert.equal(classifyLevel('Failed to generate bad.mkv (exit code 183)'), 'error')
+    assert.equal(classifyLevel('Error: EBML header parsing failed'), 'error')
+    // stderr tails go in context fields now — never as a second message body
+})
+
 // Opt-in: hits the real orchestrator endpoint when the container/CI environment supplies both vars.
 const liveConfig = readEnvironmentConfig()
 test('live ingest endpoint accepts a signed batch', { skip: liveConfig.endpointUrl && liveConfig.secret ? false : 'ORCH log ingest env not set' }, async () => {

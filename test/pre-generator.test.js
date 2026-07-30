@@ -413,3 +413,147 @@ test('getVideoInfo passes media path as execFileSync argv (no shell)', t => {
         assert.equal(call.opts && call.opts.shell, undefined)
     }
 })
+
+test('isUnreadableMediaStderr matches EBML / invalid-input library media failures', () => {
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/news.mkv', []))
+    const { isUnreadableMediaStderr } = preGenerator
+
+    const snlStderr = [
+        'core of 1, misdetection possible!',
+        '[matroska,webm @ 0x5562b5598480] 0x00 at pos 0 (0x0) invalid as first byte of an EBML number',
+        '[matroska,webm @ 0x5562b5598480] EBML header parsing failed',
+        '[in#0 @ 0x5562b5598380] Error opening input: Invalid data found when processing input'
+    ].join('\n')
+
+    assert.equal(isUnreadableMediaStderr(snlStderr), true)
+    assert.equal(isUnreadableMediaStderr('moov atom not found'), true)
+    assert.equal(isUnreadableMediaStderr('Conversion failed!'), false)
+    assert.equal(isUnreadableMediaStderr(''), false)
+    assert.equal(isUnreadableMediaStderr(null), false)
+})
+
+test('getVideoInfo returns codec unreadable (not error) when ffprobe fails', t => {
+    const childProcess = require('child_process')
+    t.mock.method(childProcess, 'execFileSync', () => {
+        const err = new Error('ffprobe failed')
+        err.stderr = 'EBML header parsing failed'
+        throw err
+    })
+
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    const preGenerator = loadPreGenerator(cacheDir, createDatabase('/library/corrupt.mkv', []))
+    const info = preGenerator.getVideoInfo('/library/corrupt.mkv')
+
+    assert.equal(info.codec, 'unreadable')
+    assert.notEqual(info.codec, 'error')
+})
+
+test('generateVideo skips unreadable media without spawning ffmpeg', async t => {
+    const childProcess = require('child_process')
+    const logs = []
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
+
+    process.env.CACHE_DIR = cacheDir
+    process.env.DIMENSIONS = '640x360'
+    process.env.VIDEO_CODEC = 'libx264'
+    process.env.AUDIO_CODEC = 'aac'
+    process.env.AUDIO_BITRATE = '128k'
+    process.env.HLS_SEGMENT_LENGTH_SECONDS = '6'
+
+    delete require.cache[preGeneratorPath]
+    require.cache[databasePath] = {
+        id: databasePath,
+        filename: databasePath,
+        loaded: true,
+        exports: () => createDatabase('/library/corrupt.mkv', [])
+    }
+    require.cache[logPath] = {
+        id: logPath,
+        filename: logPath,
+        loaded: true,
+        exports: (tag, message, channel, context) => {
+            logs.push({ tag, message, channel, context })
+        }
+    }
+
+    t.mock.method(childProcess, 'execFileSync', () => {
+        throw new Error('ffprobe failed')
+    })
+    let spawnCalls = 0
+    t.mock.method(childProcess, 'spawn', () => {
+        spawnCalls++
+        throw new Error('spawn should not be called for unreadable media')
+    })
+
+    const preGenerator = require(preGeneratorPath)
+    const channel = { slug: 'late-night', name: 'Late Night' }
+    const filePath = '/library/corrupt.mkv'
+
+    await assert.rejects(
+        () => preGenerator.generateVideo(99, filePath, channel),
+        err => {
+            assert.equal(err.unreadableMedia, true)
+            assert.equal(err.mediaSkip, true)
+            return true
+        }
+    )
+
+    assert.equal(spawnCalls, 0)
+    assert.ok(logs.some(l => /Skipping unreadable media:/.test(l.message)))
+    assert.ok(!logs.some(l => /Skipping failed video:/.test(l.message)))
+    assert.ok(!logs.some(l => /\[error /.test(l.message)))
+
+    const videoHash = crypto.createHash('md5').update(filePath).digest('hex')
+    const outputDir = path.join(cacheDir, 'channels', 'late-night', 'videos', videoHash)
+    assert.equal(fs.existsSync(outputDir), false)
+})
+
+test('startGeneration does not re-log unreadable media skips', async t => {
+    const logs = []
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'broadcaster-cache-'))
+    t.after(() => fs.rmSync(cacheDir, { recursive: true, force: true }))
+
+    process.env.CACHE_DIR = cacheDir
+    delete require.cache[preGeneratorPath]
+    require.cache[databasePath] = {
+        id: databasePath,
+        filename: databasePath,
+        loaded: true,
+        exports: () => createDatabase('/library/news.mkv', [])
+    }
+    require.cache[logPath] = {
+        id: logPath,
+        filename: logPath,
+        loaded: true,
+        exports: (tag, message) => {
+            logs.push({ tag, message })
+        }
+    }
+
+    const preGenerator = require(preGeneratorPath)
+    const channel = { slug: 'news', name: 'News' }
+    preGenerator.generationQueue = [{
+        videoId: 1,
+        filePath: '/library/news.mkv',
+        channel
+    }]
+    preGenerator.totalVideos = 1
+    preGenerator.pendingManifestUpdates = []
+    preGenerator.channelQueues = []
+    preGenerator.buildInterleavedQueue = () => {
+        // leave generationQueue as set above
+    }
+
+    const unreadableErr = preGenerator.mediaSkipError('Unreadable media (ffprobe)', { unreadable: true })
+    preGenerator.generateVideo = async () => {
+        throw unreadableErr
+    }
+
+    await preGenerator.startGeneration()
+
+    assert.ok(!logs.some(l => /Skipping failed video:/.test(l.message)))
+    assert.ok(!logs.some(l => /Skipping unreadable video:/.test(l.message)))
+    assert.ok(!logs.some(l => /Skipping video after unexpected issue:/.test(l.message)))
+})

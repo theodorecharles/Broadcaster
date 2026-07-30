@@ -32,6 +32,48 @@ function deinterlacePrefix(videoFilter, useCuda) {
     return useCuda ? 'yadif_cuda,' : 'yadif,'
 }
 
+/**
+ * True when ffmpeg/ffprobe stderr indicates the source file itself is unreadable
+ * or corrupt (empty/truncated container, missing header, etc.) — an expected
+ * library-media problem, not an app/encoder failure.
+ * Exported for unit tests.
+ * @param {string} stderr
+ * @returns {boolean}
+ */
+function isUnreadableMediaStderr(stderr) {
+    if (!stderr || typeof stderr !== 'string') return false
+    return /EBML header parsing failed|Invalid data found when processing input|Error opening input|moov atom not found|Invalid data found|End of file|does not contain any stream|Invalid argument|No such file or directory|Permission denied|could not find codec parameters/i.test(stderr)
+}
+
+/**
+ * Build a rejected Error that startGeneration treats as an expected per-file skip
+ * (no second ERROR-classified log).
+ * @param {string} message
+ * @param {{ unreadable?: boolean }} [opts]
+ */
+function mediaSkipError(message, opts = {}) {
+    const err = new Error(message)
+    err.mediaSkip = true
+    if (opts.unreadable) err.unreadableMedia = true
+    return err
+}
+
+/**
+ * Remove an empty output dir left behind after a failed/skipped encode.
+ * @param {string} outputDir
+ */
+function cleanupEmptyOutputDir(outputDir) {
+    try {
+        if (!fs.existsSync(outputDir)) return
+        const entries = fs.readdirSync(outputDir)
+        if (entries.length === 0) {
+            fs.rmdirSync(outputDir)
+        }
+    } catch (_) {
+        // best-effort
+    }
+}
+
 function checkNvidiaGPU() {
     if (gpuCheckDone) return hasNvidiaGPU
 
@@ -545,6 +587,11 @@ class PreGenerator {
                 audioCodec = 'none'
             }
 
+            // Empty probe output = no video stream / unreadable container.
+            if (!videoResult.trim()) {
+                return { codec: 'unreadable', width: '?', height: '?', pixFmt: '?', bitDepth: '?', audioCodec: '?' }
+            }
+
             return {
                 codec: videoParts[0] || 'unknown',
                 width: videoParts[1] || 'unknown',
@@ -554,7 +601,8 @@ class PreGenerator {
                 audioCodec: audioCodec
             }
         } catch (e) {
-            return { codec: 'error', width: '?', height: '?', pixFmt: '?', bitDepth: '?', audioCodec: '?' }
+            // Do not use codec "error" — that word ships as ERROR via OrchLogShipper.classifyLevel.
+            return { codec: 'unreadable', width: '?', height: '?', pixFmt: '?', bitDepth: '?', audioCodec: '?' }
         }
     }
 
@@ -570,8 +618,21 @@ class PreGenerator {
             // Create output directory
             fs.mkdirSync(outputDir, { recursive: true })
 
-            // Log video info before transcoding
+            // Probe before encode. Unreadable/corrupt library media is common; skip without
+            // spawning ffmpeg and without ERROR-level log wording that pages the monitor.
             const videoInfo = this.getVideoInfo(filePath)
+            if (videoInfo.codec === 'unreadable') {
+                cleanupEmptyOutputDir(outputDir)
+                Log(tag, `Skipping unreadable media: ${path.basename(filePath)}`, channel, {
+                    file_path: filePath,
+                    video_hash: videoHash,
+                    video_id: videoId,
+                    reason: 'ffprobe_failed'
+                })
+                reject(mediaSkipError('Unreadable media (ffprobe)', { unreadable: true }))
+                return
+            }
+
             Log(tag, `Processing ${path.basename(filePath)} [${videoInfo.codec} ${videoInfo.width}x${videoInfo.height} ${videoInfo.pixFmt} ${videoInfo.bitDepth}bit | audio: ${videoInfo.audioCodec}]`, channel)
 
             const hasGPU = checkNvidiaGPU()
@@ -697,13 +758,31 @@ class PreGenerator {
 
                     resolve()
                 } else {
-                    Log(tag, `Failed to generate ${path.basename(filePath)} (exit code ${code})`, channel, { exit_code: code, file_path: filePath, video_hash: videoHash, ffmpeg_stderr_tail: stderrData.slice(-500) })
-                    Log(tag, `Error: ${stderrData.slice(-500)}`, channel)
-                    reject(new Error(`FFmpeg exited with code ${code}`))
+                    const stderrTail = stderrData.slice(-500)
+                    const unreadable = isUnreadableMediaStderr(stderrData)
+                    const context = {
+                        exit_code: code,
+                        file_path: filePath,
+                        video_hash: videoHash,
+                        video_id: videoId,
+                        ffmpeg_stderr_tail: stderrTail
+                    }
+                    if (unreadable) {
+                        // Library media problem — WARN wording so log-monitor does not file tickets.
+                        cleanupEmptyOutputDir(outputDir)
+                        Log(tag, `Skipping encode for unreadable source: ${path.basename(filePath)} (exit ${code})`, channel, context)
+                        reject(mediaSkipError(`Unreadable media (ffmpeg exit ${code})`, { unreadable: true }))
+                    } else {
+                        // Single ERROR line; stderr lives in ffmpeg_stderr_tail context (a second
+                        // "Error: …" line re-triggers log-monitor for the same incident).
+                        Log(tag, `Failed to generate ${path.basename(filePath)} (exit code ${code})`, channel, context)
+                        reject(mediaSkipError(`FFmpeg exited with code ${code}`))
+                    }
                 }
             })
 
             ffmpeg.on('error', (err) => {
+                // spawn failures (ENOENT for ffmpeg binary, etc.) remain real errors.
                 Log(tag, `FFmpeg error for ${path.basename(filePath)}: ${err.message}`, channel, { error: err, file_path: filePath, video_hash: videoHash })
                 reject(err)
             })
@@ -766,7 +845,16 @@ class PreGenerator {
                 if (this.shuttingDown) {
                     break
                 }
-                Log(tag, `Skipping failed video: ${item.filePath}`)
+                // generateVideo already logged the outcome (WARN for corrupt library media,
+                // ERROR for real encode failures). Only emit a queue-level skip line when
+                // something unexpected escaped without a prior log. Never use "failed"/"error"
+                // wording here — that classifies as ERROR and re-files log-monitor tickets.
+                if (!err || !err.mediaSkip) {
+                    Log(tag, `Skipping video after unexpected issue: ${item.filePath}`, item.channel, {
+                        video_id: item.videoId,
+                        reason: err && err.message ? err.message : String(err)
+                    })
+                }
             }
         }
 
@@ -797,4 +885,6 @@ const preGenerator = new PreGenerator()
 module.exports = preGenerator
 module.exports.resolveEncodeSettings = resolveEncodeSettings
 module.exports.deinterlacePrefix = deinterlacePrefix
+module.exports.isUnreadableMediaStderr = isUnreadableMediaStderr
+module.exports.mediaSkipError = mediaSkipError
 
