@@ -1,8 +1,12 @@
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 const test = require('node:test')
 
 const databasePath = require.resolve('../Utilities/Database.js')
 const logPath = require.resolve('../Utilities/Log.js')
+const playlistManagerPath = require.resolve('../Classes/PlaylistManager.js')
 
 require.cache[databasePath] = {
     id: databasePath,
@@ -17,9 +21,67 @@ require.cache[logPath] = {
     exports: () => {}
 }
 
-const { PlaylistManager } = require('../Classes/PlaylistManager.js')
-
 const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000
+
+function createPlaylistFixture(t, segmentDurationsByVideo) {
+    const cacheDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'broadcaster-playlist-sequence-')
+    )
+    const originalCacheDir = process.env.CACHE_DIR
+    const originalPlaylistManagerModule = require.cache[playlistManagerPath]
+
+    process.env.CACHE_DIR = cacheDir
+    delete require.cache[playlistManagerPath]
+    const { PlaylistManager } = require(playlistManagerPath)
+    const videos = {}
+
+    for (const [hash, durations] of Object.entries(segmentDurationsByVideo)) {
+        const videoDir = path.join(
+            cacheDir,
+            'channels',
+            'test-channel',
+            'videos',
+            hash
+        )
+        const playlist = [
+            '#EXTM3U',
+            '#EXT-X-VERSION:3',
+            `#EXT-X-TARGETDURATION:${Math.ceil(Math.max(...durations))}`,
+            '#EXT-X-MEDIA-SEQUENCE:0',
+            ...durations.flatMap((duration, segmentIndex) => [
+                `#EXTINF:${duration.toFixed(6)},`,
+                `segment_${String(segmentIndex).padStart(5, '0')}.ts`
+            ]),
+            '#EXT-X-ENDLIST',
+            ''
+        ].join('\n')
+
+        fs.mkdirSync(videoDir, { recursive: true })
+        fs.writeFileSync(path.join(videoDir, 'index.m3u8'), playlist)
+        videos[hash] = {
+            duration_seconds: durations.reduce(
+                (total, duration) => total + duration,
+                0
+            ),
+            segment_count: durations.length
+        }
+    }
+
+    t.after(() => {
+        delete require.cache[playlistManagerPath]
+        if (originalPlaylistManagerModule) {
+            require.cache[playlistManagerPath] = originalPlaylistManagerModule
+        }
+        if (originalCacheDir === undefined) {
+            delete process.env.CACHE_DIR
+        } else {
+            process.env.CACHE_DIR = originalCacheDir
+        }
+        fs.rmSync(cacheDir, { recursive: true, force: true })
+    })
+
+    return { PlaylistManager, videos }
+}
 
 function createEntry(hash, startTime, duration, title = hash) {
     return {
@@ -40,7 +102,12 @@ function createGuide(dayStart, schedule) {
     }
 }
 
-function createPlaylistManager({ activeGuide, historicalGuides = [], videos }) {
+function createPlaylistManager({
+    PlaylistManager,
+    activeGuide,
+    historicalGuides = [],
+    videos
+}) {
     const guidesByDay = new Map(
         [activeGuide, ...historicalGuides].map(guide => [guide.dayStart, guide])
     )
@@ -69,6 +136,15 @@ function createPlaylistManager({ activeGuide, historicalGuides = [], videos }) {
     const manager = new PlaylistManager({ slug: 'test-channel' })
     manager.setGuideGenerator(guideGenerator)
     manager.getVideoByHash = hash => videos[hash] || null
+    manager.getAllSegmentsForVideo = (hash, video) => Array.from(
+        { length: video.segment_count },
+        (_, segmentIndex) => ({
+            duration: video.duration_seconds / video.segment_count,
+            path: `channels/test-channel/videos/${hash}/segment_${String(segmentIndex).padStart(5, '0')}.ts`,
+            segmentIndex,
+            videoHash: hash
+        })
+    )
 
     return manager
 }
@@ -89,12 +165,14 @@ test('keeps media and discontinuity sequences continuous at a program transition
     const firstEntry = createEntry('first', dayStart, 10)
     const secondEntry = createEntry('second', firstEntry.endTime, 12)
     const guide = createGuide(dayStart, [firstEntry, secondEntry])
+    const fixture = createPlaylistFixture(t, {
+        first: [2, 2, 2, 2, 2],
+        second: [2, 2, 2, 2, 2, 2]
+    })
     const manager = createPlaylistManager({
+        PlaylistManager: fixture.PlaylistManager,
         activeGuide: guide,
-        videos: {
-            first: { duration_seconds: 10, segment_count: 5 },
-            second: { duration_seconds: 12, segment_count: 6 }
-        }
+        videos: fixture.videos
     })
 
     t.mock.method(Date, 'now', () => firstEntry.startTime + 9000)
@@ -137,11 +215,13 @@ test('emits a discontinuity when consecutive entries repeat the same video', (t)
     const firstEntry = createEntry('repeat', dayStart, 10)
     const secondEntry = createEntry('repeat', firstEntry.endTime, 10)
     const guide = createGuide(dayStart, [firstEntry, secondEntry])
+    const fixture = createPlaylistFixture(t, {
+        repeat: [2, 2, 2, 2, 2]
+    })
     const manager = createPlaylistManager({
+        PlaylistManager: fixture.PlaylistManager,
         activeGuide: guide,
-        videos: {
-            repeat: { duration_seconds: 10, segment_count: 5 }
-        }
+        videos: fixture.videos
     })
 
     t.mock.method(Date, 'now', () => firstEntry.startTime + 9000)
@@ -173,14 +253,16 @@ test('carries sequence offsets across daily guide boundaries', (t) => {
         [earlyEntry, crossingEntry]
     )
     const activeGuide = createGuide(activeDayStart, [nextEntry])
+    const fixture = createPlaylistFixture(t, {
+        early: [2, 2, 2],
+        crossing: [2, 2, 2, 2],
+        next: [2, 2, 2, 2, 2]
+    })
     const manager = createPlaylistManager({
+        PlaylistManager: fixture.PlaylistManager,
         activeGuide,
         historicalGuides: [previousGuide],
-        videos: {
-            early: { duration_seconds: 6, segment_count: 3 },
-            crossing: { duration_seconds: 8, segment_count: 4 },
-            next: { duration_seconds: 10, segment_count: 5 }
-        }
+        videos: fixture.videos
     })
 
     t.mock.method(Date, 'now', () => crossingEntry.endTime - 1000)
