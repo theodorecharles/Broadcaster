@@ -5,7 +5,16 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: 'dist',
-    assetsDir: 'assets'
+    assetsDir: 'assets',
+    chunkSizeWarningLimit: 550,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          hls: ['hls.js'],
+          react: ['react', 'react-dom']
+        }
+      }
+    }
   },
   server: {
     proxy: {
