@@ -69,6 +69,15 @@ function createPlaylistManager({ activeGuide, historicalGuides = [], videos }) {
     const manager = new PlaylistManager({ slug: 'test-channel' })
     manager.setGuideGenerator(guideGenerator)
     manager.getVideoByHash = hash => videos[hash] || null
+    manager.getAllSegmentsForVideo = (hash, video) => Array.from(
+        { length: video.segment_count },
+        (_, segmentIndex) => ({
+            duration: video.duration_seconds / video.segment_count,
+            path: `channels/test-channel/videos/${hash}/segment_${String(segmentIndex).padStart(5, '0')}.ts`,
+            segmentIndex,
+            videoHash: hash
+        })
+    )
 
     return manager
 }
