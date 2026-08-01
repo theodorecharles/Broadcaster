@@ -320,7 +320,7 @@ test('persisted guide cannot emit deleted segment URLs after restart', t => {
     const reloadedGuide = restartedGuideGenerator.getActiveGuide()
     const playlist = restartedPlaylistManager.createRollingPlaylist()
 
-    assert.equal(reloadedGuide.schedule[0].hash, db.video.hash)
+    assert.deepEqual(reloadedGuide.schedule, [])
     assert.match(playlist, /#EXT-X-ENDLIST/)
     assert.doesNotMatch(playlist, /segment_\d+\.ts/)
 })
